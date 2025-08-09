@@ -591,6 +591,113 @@ class EnergySystem:
                 'P_export_ems':P_export_ems,\
                 'P_demand_ems':P_demand_ems}
 
+    def simulate_network_manual_dispatch(self, P_ESs):
+        """Simulate the network for a predefined storage dispatch schedule.
+
+        Parameters
+        ----------
+        P_ESs : numpy.ndarray
+            Matrix of storage powers at system resolution ``(T, N_ES)``.
+
+        Returns
+        -------
+        dict
+            Contains power flow results and aggregated powers at EMS
+            resolution.
+        """
+
+        # number of storage and nondispatchable assets
+        N_ESs = len(self.storage_assets)
+        N_nondispatch = len(self.nondispatch_assets)
+
+        # update each storage asset with the provided power profile
+        for i in range(N_ESs):
+            # apply column ``i`` of ``P_ESs`` to asset ``i``
+            self.storage_assets[i].update_control(P_ESs[:, i])
+
+        # set up demand arrays for every bus and phase
+        N_buses = self.network.N_buses
+        N_phases = self.network.N_phases
+        P_demand_buses = np.zeros([self.T, N_buses, N_phases])
+        Q_demand_buses = np.zeros([self.T, N_buses, N_phases])
+
+        # add storage asset contributions
+        for i in range(N_ESs):
+            bus_id = self.storage_assets[i].bus_id
+            phases_i = self.storage_assets[i].phases
+            N_phases_i = np.size(phases_i)
+            for ph_i in np.nditer(phases_i):
+                P_demand_buses[:, bus_id, ph_i] += \
+                    self.storage_assets[i].Pnet / N_phases_i
+                Q_demand_buses[:, bus_id, ph_i] += \
+                    self.storage_assets[i].Qnet / N_phases_i
+
+        # add nondispatchable asset contributions
+        for i in range(N_nondispatch):
+            bus_id = self.nondispatch_assets[i].bus_id
+            phases_i = self.nondispatch_assets[i].phases
+            N_phases_i = np.size(phases_i)
+            for ph_i in np.nditer(phases_i):
+                P_demand_buses[:, bus_id, ph_i] += \
+                    self.nondispatch_assets[i].Pnet / N_phases_i
+                Q_demand_buses[:, bus_id, ph_i] += \
+                    self.nondispatch_assets[i].Qnet / N_phases_i
+
+        # run a full power-flow for each time step
+        PF_network_res = []
+        print('*** SIMULATING THE NETWORK ***')
+        for t in range(self.T):
+            network_t = copy.deepcopy(self.network)
+            network_t.clear_loads()
+            for bus_id in range(N_buses):
+                for ph_i in range(N_phases):
+                    Pph_t = P_demand_buses[t, bus_id, ph_i]
+                    Qph_t = Q_demand_buses[t, bus_id, ph_i]
+                    # populate the copy of the network with loads
+                    network_t.set_load(bus_id, ph_i, Pph_t, Qph_t)
+            network_t.zbus_pf()
+            if t % 1 == 0:
+                print('network sim complete for t = ' + str(t) + ' of ' + str(self.T))
+            PF_network_res.append(network_t)
+        print('*** NETWORK SIMULATION COMPLETE ***')
+
+        # aggregate powers to EMS resolution for plotting/output
+        P_ES_ems = np.zeros([self.T_ems, N_ESs])
+        P_import_ems = np.zeros(self.T_ems)
+        P_export_ems = np.zeros(self.T_ems)
+        P_demand_ems = np.zeros(self.T_ems)
+
+        # power at market bus for every system step
+        Pnet_market = np.zeros(self.T)
+        bus_id_market = self.market.bus_id
+        for t in range(self.T):
+            market_bus_res = PF_network_res[t].res_bus_df.iloc[bus_id_market]
+            Pnet_market[t] = np.real(market_bus_res['Sa'] +
+                                     market_bus_res['Sb'] +
+                                     market_bus_res['Sc'])
+
+        # base demand without storage assets
+        P_base = np.zeros(self.T)
+        for i in range(N_nondispatch):
+            P_base += self.nondispatch_assets[i].Pnet
+
+        # convert system level results to EMS resolution
+        for t_ems in range(self.T_ems):
+            t_idx = (t_ems * self.dt_ems / self.dt +
+                     np.arange(0, self.dt_ems / self.dt)).astype(int)
+            P_ES_ems[t_ems, :] = np.mean(P_ESs[t_idx, :], axis=0)
+            P_mean = np.mean(Pnet_market[t_idx])
+            P_import_ems[t_ems] = max(P_mean, 0)
+            P_export_ems[t_ems] = max(-P_mean, 0)
+            P_demand_ems[t_ems] = np.mean(P_base[t_idx] +
+                                          np.sum(P_ESs[t_idx, :], axis=1))
+
+        return {'PF_network_res': PF_network_res,
+                'P_ES_ems': P_ES_ems,
+                'P_import_ems': P_import_ems,
+                'P_export_ems': P_export_ems,
+                'P_demand_ems': P_demand_ems}
+
 #######################################
 ### Model Predictive Control Methods
 #######################################

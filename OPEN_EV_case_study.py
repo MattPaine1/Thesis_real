@@ -38,8 +38,10 @@ __version__ = "1.0.0"
 ### RUN OPT OR JUST PLOT (IF RESULTS PICKLED)
 ################################################
 
+# run all optimisation/heuristic strategies
 run_opt = 1
-opt_type = ['open_loop', 'mpc']
+# list of strategies to evaluate
+opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'lp']
 
 path_string = normpath('Results/EV_Case_Study/')
 if not os.path.isdir(path_string):
@@ -462,23 +464,30 @@ if run_opt ==1:
     
     energy_system = ES.EnergySystem(storage_assets, nondispatch_assets, network,
                                     market, dt, T, dt_ems, T_ems)
-    
+
+    # pre-compute base demand profiles for use in heuristic controllers
+    P_demand_base = np.zeros(T)  # actual base demand at system resolution
+    P_demand_base_pred = np.zeros(T)  # predicted base demand
+    for nd in nondispatch_assets:
+        P_demand_base += nd.Pnet
+        P_demand_base_pred += nd.Pnet_pred
+
     #######################################
-    ### STEP 6: simulate the energy system: 
+    ### STEP 6: simulate the energy system:
     #######################################
     
     i_line_unconst_list = list(range(network.N_lines))
     v_bus_unconst_list = []
     
     for x in opt_type:
-        if x == "open_loop": 
+        if x == "open_loop":
             output = energy_system.\
                     simulate_network_3phPF('3ph',\
                                            i_unconstrained_lines=\
                                            i_line_unconst_list,\
                                            v_unconstrained_buses=\
                                            v_bus_unconst_list)
-        
+
         if x == "mpc":
             output = energy_system.\
                     simulate_network_mpc_3phPF('3ph',
@@ -486,21 +495,59 @@ if run_opt ==1:
                                                i_line_unconst_list,\
                                                v_unconstrained_buses=\
                                                v_bus_unconst_list)
+
+        if x == "uncontrolled":
+            P_ESs = np.zeros((T, N_ESs))
+            for i in range(N_EVs):
+                t_a = int(ta_EVs[i] * dt_ems / dt)
+                t_d = int(td_EVs[i] * dt_ems / dt)
+                E = E0_EVs[i]
+                t = t_a
+                while t < t_d and E < Emax_EV:
+                    P_ESs[t, i] = P_max_EV
+                    E += P_max_EV * dt
+                    t += 1
+            output = energy_system.simulate_network_manual_dispatch(P_ESs)
+
+        if x == "edf":
+            P_ESs = np.zeros((T, N_ESs))
+            E_state = E0_EVs.copy()
+            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
+            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            for t in range(T):
+                t_ems = int(t / (dt_ems / dt))
+                P_avail = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+                connected = [i for i in range(N_EVs)
+                             if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV]
+                connected.sort(key=lambda i: t_d_dt[i])
+                for i in connected:
+                    P_need = (Emax_EV - E_state[i]) / dt
+                    P_ch = min(P_max_EV, P_avail, P_need)
+                    if P_ch <= 0:
+                        continue
+                    P_ESs[t, i] = P_ch
+                    E_state[i] += P_ch * dt
+                    P_avail -= P_ch
+                    if P_avail <= 0:
+                        break
+            output = energy_system.simulate_network_manual_dispatch(P_ESs)
+
+        if x == "lp":
+            for nd in nondispatch_assets:
+                nd.Pnet_pred = nd.Pnet.copy()
+            P_demand_base_pred = P_demand_base.copy()
+            output = energy_system.\
+                    simulate_network_3phPF('copper_plate',\
+                                           i_unconstrained_lines=\
+                                           i_line_unconst_list,\
+                                           v_unconstrained_buses=\
+                                           v_bus_unconst_list)
+
         PF_network_res = output['PF_network_res']
         P_import_ems = output['P_import_ems']
         P_export_ems = output['P_export_ems']
         P_ES_ems = output['P_ES_ems']
         P_demand_ems = output['P_demand_ems']
-            
-        P_demand_base = np.zeros(T)
-        for i in range(len(nondispatch_assets)):
-            bus_id = nondispatch_assets[i].bus_id
-            P_demand_base += nondispatch_assets[i].Pnet
-            
-        P_demand_base_pred = np.zeros(T)
-        for i in range(len(nondispatch_assets)):
-            bus_id = nondispatch_assets[i].bus_id
-            P_demand_base_pred += nondispatch_assets[i].Pnet_pred
         
         Pnet_market = np.zeros(T)
         for t in range(T):
@@ -540,17 +587,35 @@ if run_opt ==1:
         print(energy_cost_string)
         
         #save the data
-        if x == "open_loop": 
+        if x == "open_loop":
             pickled_data_OL = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                             Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
                             time_ems, time, timeE, buses_Vpu)
             pickle.dump(pickled_data_OL, open(join(path_string, normpath("EV_case_data_open_loop.p")), "wb"))
-        
+
         if x == "mpc":
             pickled_data_MPC = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                             Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
                             time_ems, time, timeE, buses_Vpu)
             pickle.dump(pickled_data_MPC, open(join(path_string, normpath("EV_case_data_mpc.p")), "wb"))
+
+        if x == "uncontrolled":
+            pickled_data_UC = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
+                            Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
+                            time_ems, time, timeE, buses_Vpu)
+            pickle.dump(pickled_data_UC, open(join(path_string, normpath("EV_case_data_uncontrolled.p")), "wb"))
+
+        if x == "edf":
+            pickled_data_EDF = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
+                            Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
+                            time_ems, time, timeE, buses_Vpu)
+            pickle.dump(pickled_data_EDF, open(join(path_string, normpath("EV_case_data_edf.p")), "wb"))
+
+        if x == "lp":
+            pickled_data_LP = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
+                            Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
+                            time_ems, time, timeE, buses_Vpu)
+            pickle.dump(pickled_data_LP, open(join(path_string, normpath("EV_case_data_lp.p")), "wb"))
         
         
         figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
@@ -562,9 +627,18 @@ else:
     for x in opt_type:
         if x == "open_loop":
             import_data = pickle.load(open(join(path_string, normpath("EV_case_data_open_loop.p")), "rb"))
-        
+
         if x == "mpc":
             import_data = pickle.load(open(join(path_string, normpath("EV_case_data_mpc.p")), "rb"))
+
+        if x == "uncontrolled":
+            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_uncontrolled.p")), "rb"))
+
+        if x == "edf":
+            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_edf.p")), "rb"))
+
+        if x == "lp":
+            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_lp.p")), "rb"))
 
         N_EVs = import_data[0]
         P_demand_base_pred_ems = import_data[1]
