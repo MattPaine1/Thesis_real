@@ -496,34 +496,34 @@ if run_opt ==1:
                                                v_unconstrained_buses=\
                                                v_bus_unconst_list)
 
-        if x == "uncontrolled":
-            P_ESs = np.zeros((T, N_ESs))
-            for i in range(N_EVs):
-                t_a = int(ta_EVs[i] * dt_ems / dt)
-                t_d = int(td_EVs[i] * dt_ems / dt)
-                E = E0_EVs[i]
+        if x == "uncontrolled": 
+            P_ESs = np.zeros((T, N_ESs)) #create array to EV charging power at each timestep
+            for i in range(N_EVs): # for every EV
+                t_a = int(ta_EVs[i] * dt_ems / dt) #arrival time
+                t_d = int(td_EVs[i] * dt_ems / dt) # departure time
+                E = E0_EVs[i] # EV stored energy at its initial state
                 t = t_a
-                while t < t_d and E < Emax_EV:
-                    P_ESs[t, i] = P_max_EV
+                while t < t_d and E < Emax_EV: # while EV is here and not full, keep charging
+                    P_ESs[t, i] = P_max_EV # EV charge is at max
                     E += P_max_EV * dt
                     t += 1
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "edf":
-            P_ESs = np.zeros((T, N_ESs))
-            E_state = E0_EVs.copy()
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
+            P_ESs = np.zeros((T, N_ESs)) 
+            E_state = E0_EVs.copy() #copy of each EV and its state of charge
+            t_a_dt = (ta_EVs * dt_ems / dt).astype(int) 
             t_d_dt = (td_EVs * dt_ems / dt).astype(int)
             for t in range(T):
                 t_ems = int(t / (dt_ems / dt))
-                P_avail = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+                P_avail = max(market.Pmax[t_ems] - P_demand_base[t], 0) #power available in the market
                 connected = [i for i in range(N_EVs)
-                             if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV]
-                connected.sort(key=lambda i: t_d_dt[i])
-                for i in connected:
-                    P_need = (Emax_EV - E_state[i]) / dt
-                    P_ch = min(P_max_EV, P_avail, P_need)
-                    if P_ch <= 0:
+                             if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV] #list of all connected EVs at current moment needing charge
+                connected.sort(key=lambda i: t_d_dt[i]) # sort by earliest departure
+                for i in connected: # loop through sorted list of connected EVs
+                    P_need = (Emax_EV - E_state[i]) / dt # power needed to finish charging in one step if possib;e
+                    P_ch = min(P_max_EV, P_avail, P_need) # must limit charging power
+                    if P_ch <= 0: # skip if no power available to charge
                         continue
                     P_ESs[t, i] = P_ch
                     E_state[i] += P_ch * dt
@@ -533,10 +533,10 @@ if run_opt ==1:
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "lp":
-            for nd in nondispatch_assets:
+            for nd in nondispatch_assets: # for every non-dispatachable asset in the network, set predicited power to actual power for whole day
                 nd.Pnet_pred = nd.Pnet.copy()
-            P_demand_base_pred = P_demand_base.copy()
-            output = energy_system.\
+            P_demand_base_pred = P_demand_base.copy() # perfect forecast
+            output = energy_system.\ # run 3-phase power flow with no network congestion
                     simulate_network_3phPF('copper_plate',\
                                            i_unconstrained_lines=\
                                            i_line_unconst_list,\
@@ -552,7 +552,7 @@ if run_opt ==1:
         Pnet_market = np.zeros(T)
         for t in range(T):
             market_bus_res = PF_network_res[t].res_bus_df.iloc[bus_id_market]
-            Pnet_market[t] = np.real\
+            Pnet_market[t] = np.real\ # sum the three-phase complex powers, take real net power at time t
                             (market_bus_res['Sa']\
                              + market_bus_res['Sb']\
                              + market_bus_res['Sc'])
