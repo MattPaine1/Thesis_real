@@ -55,22 +55,54 @@ def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
     # plot half hour predicted and actual net load
     title = '' #str(x)
     plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
-    plt.plot(time_ems,P_demand_base_pred_ems,label=\
-             'Predicted net load, 30 mins')
-    plt.plot(time_ems,P_compare, label =\
-             'Predicted net load + EVs charging, 30 mins')
+
+    # Plot all predicted net load profiles with low opacity
+    base_array = np.asarray(P_demand_base_pred_ems)
+    if base_array.ndim == 1:
+        base_array = base_array[:, None]
+    for i in range(base_array.shape[1]):
+        plt.plot(time_ems, base_array[:, i], color='C0', alpha=0.15)
+
+    # Plot all comparison profiles with low opacity
+    compare_array = np.asarray(P_compare)
+    if compare_array.ndim == 1:
+        compare_array = compare_array[:, None]
+    for i in range(compare_array.shape[1]):
+        plt.plot(time_ems, compare_array[:, i], color='C1', alpha=0.15)
+
+    # Plot mean profiles with labels
+    base_mean_line, = plt.plot(
+        time_ems,
+        base_array.mean(axis=1),
+        color='C0',
+        label='Predicted net load (mean, 30 mins)'
+    )
+    compare_mean_line, = plt.plot(
+        time_ems,
+        compare_array.mean(axis=1),
+        color='C1',
+        label='Predicted net load + EVs charging (mean, 30 mins)'
+    )
+
     plt.ylabel('Power (kW)')
     plt.ylim(0, 2100)
     plt.xticks([0,8,16,23.75],('00:00', '08:00', '16:00', '00:00'))
     plt.xlabel('Time (hh:mm)')
     plt.xlim(0, max(time_ems))
     plt.grid(True,alpha=0.5)
-    plt.legend()
+    plt.legend(
+        handles=[base_mean_line, compare_mean_line],
+        loc='upper left',
+        bbox_to_anchor=(1.05, 1),
+        borderaxespad=0.0
+    )
     plt.tight_layout()
     ax = plt.gca()
     plt.text(0.02, 0.9, title, transform=ax.transAxes, fontsize=12)
-    plt.savefig(join(path_string, normpath('P_ems_'  + str(x) + save_suffix)),
-                bbox_inches='tight')
+    plt.savefig(
+        join(path_string, normpath('P_ems_'  + str(x) + save_suffix)),
+        bbox_inches='tight'
+    )
 
     # plot 5 minute predicted and actual net load
     plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
