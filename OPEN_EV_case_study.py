@@ -41,7 +41,9 @@ __version__ = "1.0.0"
 # run all optimisation/heuristic strategies
 run_opt = 1
 # list of strategies to evaluate
-opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'lp']
+# Added heuristic strategies 'tou' (time-of-use rule) and 'valley'
+# (valley-filling greedy)
+opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp']
 
 path_string = normpath('Results/EV_Case_Study/')
 if not os.path.isdir(path_string):
@@ -510,9 +512,9 @@ if run_opt ==1:
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "edf":
-            P_ESs = np.zeros((T, N_ESs)) 
+            P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy() #copy of each EV and its state of charge
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int) 
+            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
             t_d_dt = (td_EVs * dt_ems / dt).astype(int)
             for t in range(T):
                 t_ems = int(t / (dt_ems / dt))
@@ -528,8 +530,62 @@ if run_opt ==1:
                     P_ESs[t, i] = P_ch
                     E_state[i] += P_ch * dt
                     P_avail -= P_ch
-                    if P_avail <= 0:
+                if P_avail <= 0:
+                    break
+            output = energy_system.simulate_network_manual_dispatch(P_ESs)
+
+        if x == "tou":
+            # Time-of-Use heuristic: charge at max power during off-peak
+            # periods or when close to departure.
+            P_ESs = np.zeros((T, N_ESs))
+            E_state = E0_EVs.copy()
+            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
+            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            safeguard = 2  # hours before departure to start charging
+            for t in range(T):
+                hour = t * dt
+                off_peak = (hour < 7) or (hour >= 23)
+                t_ems = int(t / (dt_ems / dt))
+                P_avail = max(
+                    market.Pmax[t_ems] - P_demand_base[t] - P_ESs[t].sum(), 0
+                )
+                for i in range(N_EVs):
+                    if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV:
+                        hrs_to_depart = (t_d_dt[i] - t) * dt
+                        if off_peak or hrs_to_depart <= safeguard:
+                            P_need = (Emax_EV - E_state[i]) / dt
+                            P_ch = min(P_max_EV, P_avail, P_need)
+                            if P_ch <= 0:
+                                continue
+                            P_ESs[t, i] = P_ch
+                            E_state[i] += P_ch * dt
+                            P_avail -= P_ch
+                            if P_avail <= 0:
+                                break
+            output = energy_system.simulate_network_manual_dispatch(P_ESs)
+
+        if x == "valley":
+            # Valley-filling greedy heuristic
+            P_ESs = np.zeros((T, N_ESs))
+            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
+            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            current_load = P_demand_base_pred.copy()
+            for i in range(N_EVs):
+                energy_needed = Emax_EV - E0_EVs[i]
+                available = np.arange(t_a_dt[i], t_d_dt[i])
+                # sort available times by current total load (low to high)
+                sorted_times = sorted(available, key=lambda tt: current_load[tt])
+                for t in sorted_times:
+                    if energy_needed <= 0:
                         break
+                    t_ems = int(t / (dt_ems / dt))
+                    P_avail = max(market.Pmax[t_ems] - current_load[t], 0)
+                    if P_avail <= 0:
+                        continue
+                    P_ch = min(P_max_EV, P_avail, energy_needed / dt)
+                    P_ESs[t, i] = P_ch
+                    current_load[t] += P_ch
+                    energy_needed -= P_ch * dt
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "lp":
@@ -613,6 +669,18 @@ if run_opt ==1:
                             time_ems, time, timeE, buses_Vpu)
             pickle.dump(pickled_data_EDF, open(join(path_string, normpath("EV_case_data_edf.p")), "wb"))
 
+        if x == "tou":
+            pickled_data_TOU = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
+                            Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
+                            time_ems, time, timeE, buses_Vpu)
+            pickle.dump(pickled_data_TOU, open(join(path_string, normpath("EV_case_data_tou.p")), "wb"))
+
+        if x == "valley":
+            pickled_data_VF = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
+                            Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
+                            time_ems, time, timeE, buses_Vpu)
+            pickle.dump(pickled_data_VF, open(join(path_string, normpath("EV_case_data_valley.p")), "wb"))
+
         if x == "lp":
             pickled_data_LP = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                             Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
@@ -638,6 +706,12 @@ else:
 
         if x == "edf":
             import_data = pickle.load(open(join(path_string, normpath("EV_case_data_edf.p")), "rb"))
+
+        if x == "tou":
+            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_tou.p")), "rb"))
+
+        if x == "valley":
+            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_valley.p")), "rb"))
 
         if x == "lp":
             import_data = pickle.load(open(join(path_string, normpath("EV_case_data_lp.p")), "rb"))
