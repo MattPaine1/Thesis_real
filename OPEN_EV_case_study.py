@@ -478,7 +478,8 @@ if run_opt ==1:
     
     i_line_unconst_list = list(range(network.N_lines))
     v_bus_unconst_list = []
-    
+    peak_demands = {}
+
     for x in opt_type:
         if x == "open_loop":
             output = energy_system.\
@@ -556,6 +557,8 @@ if run_opt ==1:
                             (market_bus_res['Sa']\
                              + market_bus_res['Sb']\
                              + market_bus_res['Sc'])
+
+        peak_demands[x] = Pnet_market.max()
         
         buses_Vpu = np.zeros([T,N_buses,N_phases])
         for t in range(T):
@@ -622,8 +625,18 @@ if run_opt ==1:
                     Pnet_market, storage_assets, N_ESs,\
                     nondispatch_assets, time_ems, time, timeE, buses_Vpu)
 
+    # Plot peak demand comparison for all strategies
+    plt.figure(figsize=(6, 4))
+    plt.bar(list(peak_demands.keys()), list(peak_demands.values()))
+    plt.ylabel('Peak Demand (kW)')
+    plt.xlabel('Strategy')
+    plt.tight_layout()
+    plt.savefig(join(path_string, normpath('Peak_Demand_Comparison.pdf')), bbox_inches='tight')
+
 # Load pickled data and plot
 else:
+    peak_demands = {}
+
     for x in opt_type:
         if x == "open_loop":
             import_data = pickle.load(open(join(path_string, normpath("EV_case_data_open_loop.p")), "rb"))
@@ -652,10 +665,20 @@ else:
         time = import_data[9]
         timeE = import_data[10]
         buses_Vpu = import_data[11]
+
+        peak_demands[x] = Pnet_market.max()
         
         figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                 Pnet_market, storage_assets, N_ESs,\
                 nondispatch_assets, time_ems, time, timeE, buses_Vpu)
+
+    # Plot peak demand comparison for all strategies
+    plt.figure(figsize=(6, 4))
+    plt.bar(list(peak_demands.keys()), list(peak_demands.values()))
+    plt.ylabel('Peak Demand (kW)')
+    plt.xlabel('Strategy')
+    plt.tight_layout()
+    plt.savefig(join(path_string, normpath('Peak_Demand_Comparison.pdf')), bbox_inches='tight')
 
 
 
