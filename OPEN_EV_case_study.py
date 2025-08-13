@@ -47,6 +47,10 @@ path_string = normpath('Results/EV_Case_Study/')
 if not os.path.isdir(path_string):
     os.makedirs(path_string)
 save_suffix = '.pdf'
+dt = 5/60  # 5 minute time intervals
+
+# store total import energy for comparison
+import_energy = {}
 
 def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                 Pnet_market, storage_assets, N_ESs,\
@@ -166,7 +170,7 @@ if run_opt ==1:
     ### STEP 1: setup parameters
     #######################################
     
-    dt = 5/60  # 5 minute time intervals
+    # dt defined globally
     T = int(24/dt)  # Number of time intervals
     dt_ems = 30/60  # 30 minute EMS time intervals
     T_ems = int(T*dt/dt_ems)  # Number of EMS intervals
@@ -536,12 +540,11 @@ if run_opt ==1:
             for nd in nondispatch_assets: # for every non-dispatachable asset in the network, set predicited power to actual power for whole day
                 nd.Pnet_pred = nd.Pnet.copy()
             P_demand_base_pred = P_demand_base.copy() # perfect forecast
-            output = energy_system.\ # run 3-phase power flow with no network congestion
-                    simulate_network_3phPF('copper_plate',\
-                                           i_unconstrained_lines=\
-                                           i_line_unconst_list,\
-                                           v_unconstrained_buses=\
-                                           v_bus_unconst_list)
+            # run 3-phase power flow with no network congestion
+            output = energy_system.simulate_network_3phPF(
+                'copper_plate',
+                i_unconstrained_lines=i_line_unconst_list,
+                v_unconstrained_buses=v_bus_unconst_list)
 
         PF_network_res = output['PF_network_res']
         P_import_ems = output['P_import_ems']
@@ -552,10 +555,14 @@ if run_opt ==1:
         Pnet_market = np.zeros(T)
         for t in range(T):
             market_bus_res = PF_network_res[t].res_bus_df.iloc[bus_id_market]
-            Pnet_market[t] = np.real\ # sum the three-phase complex powers, take real net power at time t
-                            (market_bus_res['Sa']\
-                             + market_bus_res['Sb']\
-                             + market_bus_res['Sc'])
+            # sum the three-phase complex powers, take real net power at time t
+            Pnet_market[t] = np.real(
+                market_bus_res['Sa']
+                + market_bus_res['Sb']
+                + market_bus_res['Sc'])
+
+        # accumulate import energy (kWh)
+        import_energy[x] = np.sum(np.maximum(Pnet_market, 0)) * dt
         
         buses_Vpu = np.zeros([T,N_buses,N_phases])
         for t in range(T):
@@ -652,11 +659,22 @@ else:
         time = import_data[9]
         timeE = import_data[10]
         buses_Vpu = import_data[11]
+
+        # accumulate import energy (kWh)
+        import_energy[x] = np.sum(np.maximum(Pnet_market, 0)) * dt
         
         figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                 Pnet_market, storage_assets, N_ESs,\
                 nondispatch_assets, time_ems, time, timeE, buses_Vpu)
 
-
-
-    
+# plot total import energy comparison across strategies
+if import_energy:
+    plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
+    strategies = list(import_energy.keys())
+    totals = [import_energy[s] for s in strategies]
+    plt.bar(strategies, totals)
+    plt.ylabel('Total Import Energy (kWh)')
+    plt.grid(True, alpha=0.5)
+    plt.tight_layout()
+    plt.savefig(join(path_string, normpath('total_import_energy' + save_suffix)),
+                bbox_inches='tight')
