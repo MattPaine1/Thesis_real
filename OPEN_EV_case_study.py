@@ -568,12 +568,12 @@ if run_opt ==1:
             for nd in nondispatch_assets: # for every non-dispatachable asset in the network, set predicited power to actual power for whole day
                 nd.Pnet_pred = nd.Pnet.copy()
             P_demand_base_pred = P_demand_base.copy() # perfect forecast
-            output = energy_system.\ # run 3-phase power flow with no network congestion
-                    simulate_network_3phPF('copper_plate',\
-                                           i_unconstrained_lines=\
-                                           i_line_unconst_list,\
-                                           v_unconstrained_buses=\
-                                           v_bus_unconst_list)
+            # run 3-phase power flow with no network congestion
+            output = energy_system.simulate_network_3phPF(
+                "copper_plate",
+                i_unconstrained_lines=i_line_unconst_list,
+                v_unconstrained_buses=v_bus_unconst_list,
+            )
 
         PF_network_res = output['PF_network_res']
         P_import_ems = output['P_import_ems']
@@ -584,10 +584,12 @@ if run_opt ==1:
         Pnet_market = np.zeros(T)
         for t in range(T):
             market_bus_res = PF_network_res[t].res_bus_df.iloc[bus_id_market]
-            Pnet_market[t] = np.real\ # sum the three-phase complex powers, take real net power at time t
-                            (market_bus_res['Sa']\
-                             + market_bus_res['Sb']\
-                             + market_bus_res['Sc'])
+            # sum the three-phase complex powers, take real net power at time t
+            Pnet_market[t] = np.real(
+                market_bus_res["Sa"]
+                + market_bus_res["Sb"]
+                + market_bus_res["Sc"]
+            )
         
         buses_Vpu = np.zeros([T,N_buses,N_phases])
         for t in range(T):
