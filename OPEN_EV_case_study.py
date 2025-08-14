@@ -537,24 +537,24 @@ if run_opt ==1:
         if x == "tou":
             # Time-of-Use heuristic: charge at max power during off-peak
             # periods or when close to departure.
-            P_ESs = np.zeros((T, N_ESs))
+            P_ESs = np.zeros((T, N_ESs)) # matrix to store every EV at each time step
             E_state = E0_EVs.copy()
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
+            t_a_dt = (ta_EVs * dt_ems / dt).astype(int) # arrival and departure time conversion to be compaatible with sim
             t_d_dt = (td_EVs * dt_ems / dt).astype(int)
-            safeguard = 2  # hours before departure to start charging
+            safeguard = 2  # hours before departure to start charging, to avoid non-charges
             for t in range(T):
-                hour = t * dt
-                off_peak = (hour < 7) or (hour >= 23)
+                hour = t * dt # current hour
+                off_peak = (hour < 7) or (hour >= 22) # offpeak range
                 t_ems = int(t / (dt_ems / dt))
                 P_avail = max(
                     market.Pmax[t_ems] - P_demand_base[t] - P_ESs[t].sum(), 0
                 )
-                for i in range(N_EVs):
-                    if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV:
+                for i in range(N_EVs): #iterate over all evs
+                    if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV: # only consider evs that are present and not fully charged
                         hrs_to_depart = (t_d_dt[i] - t) * dt
-                        if off_peak or hrs_to_depart <= safeguard:
+                        if off_peak or hrs_to_depart <= safeguard: # if true then charge
                             P_need = (Emax_EV - E_state[i]) / dt
-                            P_ch = min(P_max_EV, P_avail, P_need)
+                            P_ch = min(P_max_EV, P_avail, P_need) 
                             if P_ch <= 0:
                                 continue
                             P_ESs[t, i] = P_ch
