@@ -571,10 +571,10 @@ if run_opt ==1:
             t_d_dt = (td_EVs * dt_ems / dt).astype(int)
             current_load = P_demand_base_pred.copy()
             for i in range(N_EVs):
-                energy_needed = Emax_EV - E0_EVs[i]
-                available = np.arange(t_a_dt[i], t_d_dt[i])
+                energy_needed = Emax_EV - E0_EVs[i] #how much energy required to be full
+                available = np.arange(t_a_dt[i], t_d_dt[i]) # when the EV is present
                 # sort available times by current total load (low to high)
-                sorted_times = sorted(available, key=lambda tt: current_load[tt])
+                sorted_times = sorted(available, key=lambda tt: current_load[tt]) # rank the timeslots to fill valleys first
                 for t in sorted_times:
                     if energy_needed <= 0:
                         break
