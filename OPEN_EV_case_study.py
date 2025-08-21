@@ -249,6 +249,29 @@ def plot_performance_metrics(metrics, path):
              'peak_import_power')
     bar_plot(metrics['peak_energy_demand'], 'Peak Energy Demand (kW)',
              'peak_energy_demand')
+    # Combined stacked bar: base demand and additional imported power
+    import_minus_demand = {
+        s: metrics['peak_import_power'][s] - metrics['peak_energy_demand'][s]
+        for s in strategies
+    }
+    demand_vals = [metrics['peak_energy_demand'][s] for s in strategies]
+    extra_vals = [import_minus_demand[s] for s in strategies]
+    plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
+               edgecolor='k')
+    plt.bar(strategies, demand_vals, label='Peak Energy Demand')
+    plt.bar(strategies, extra_vals, bottom=demand_vals,
+            label='Additional Imported Power', color='orange')
+    plt.ylabel('Power (kW)')
+    plt.xlabel('Strategy')
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(join(path, normpath('import_power_combined' + save_suffix)),
+                bbox_inches='tight')
+    plt.close()
+
+    # Only the additional imported power (effect of EVs)
+    bar_plot(import_minus_demand, 'Additional Imported Power (kW)',
+             'import_power_minus_demand')
     bar_plot(metrics['aggregate_waiting_time'], 'Aggregate Waiting Time (h)',
              'aggregate_waiting_time')
 
