@@ -163,9 +163,27 @@ def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
     plt.savefig(join(path_string, normpath('Vmin_'  + str(x) + save_suffix)),
                 bbox_inches='tight')
 
-def record_metrics(strategy, storage_assets, P_import_ems, P_demand_ems,
+def record_metrics(strategy, storage_assets, P_import, P_demand,
                    ta_EVs, td_EVs, dt, dt_ems, Emax_EV):
-    """Collect performance metrics for a strategy."""
+    """Collect performance metrics for a strategy at system resolution.
+
+    Parameters
+    ----------
+    strategy : str
+        Name of the control strategy being evaluated.
+    storage_assets : list
+        List of storage assets (EVs) in the system.
+    P_import : ndarray
+        Net power imported from the grid at the simulation time step (kW).
+    P_demand : ndarray
+        System power demand at the simulation time step (kW).
+    ta_EVs, td_EVs : ndarray
+        EV arrival and departure times (EMS resolution).
+    dt, dt_ems : float
+        Simulation and EMS time step sizes in hours.
+    Emax_EV : float
+        Maximum energy capacity of the EV batteries (kWh).
+    """
     N_EVs = len(storage_assets)
     t_a = (ta_EVs * dt_ems / dt).astype(int)
     t_d = (td_EVs * dt_ems / dt).astype(int)
@@ -189,8 +207,9 @@ def record_metrics(strategy, storage_assets, P_import_ems, P_demand_ems,
         else:
             time_to_full.append(full_idx[0] * dt)
 
-    metrics['peak_import_power'][strategy] = np.max(P_import_ems)
-    metrics['peak_energy_demand'][strategy] = np.max(P_demand_ems)
+    # Peak metrics computed at the finest simulation resolution
+    metrics['peak_import_power'][strategy] = np.max(P_import)
+    metrics['peak_energy_demand'][strategy] = np.max(P_demand)
     metrics['waiting_times'][strategy] = waiting_times
     metrics['aggregate_waiting_time'][strategy] = np.nansum(waiting_times)
     metrics['time_to_full_charge'][strategy] = time_to_full
@@ -712,14 +731,7 @@ if run_opt ==1:
             )
 
         PF_network_res = output['PF_network_res']
-        P_import_ems = output['P_import_ems']
-        P_export_ems = output['P_export_ems']
         P_ES_ems = output['P_ES_ems']
-        P_demand_ems = output['P_demand_ems']
-
-
-        record_metrics(x, storage_assets, P_import_ems, P_demand_ems,
-                        ta_EVs, td_EVs, dt, dt_ems, Emax_EV)
         
         Pnet_market = np.zeros(T)
         for t in range(T):
@@ -730,6 +742,14 @@ if run_opt ==1:
                 + market_bus_res["Sb"]
                 + market_bus_res["Sc"]
             )
+
+        # system demand at simulation resolution (base + EV charging)
+        P_demand = P_demand_base.copy()
+        for sa in storage_assets:
+            P_demand += sa.Pnet
+
+        record_metrics(x, storage_assets, Pnet_market, P_demand,
+                        ta_EVs, td_EVs, dt, dt_ems, Emax_EV)
         
         buses_Vpu = np.zeros([T,N_buses,N_phases])
         for t in range(T):
