@@ -43,12 +43,28 @@ run_opt = 1
 # list of strategies to evaluate
 # Added heuristic strategies 'tou' (time-of-use rule) and 'valley'
 # (valley-filling greedy)
-opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp']
+# opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp']
+opt_type = ['open_loop', 'uncontrolled', 'edf', 'tou', 'valley', 'lp']
+
 
 path_string = normpath('Results/EV_Case_Study/')
 if not os.path.isdir(path_string):
     os.makedirs(path_string)
 save_suffix = '.pdf'
+
+# folder for performance metric plots
+metrics_path = join(path_string, 'performance_metrics')
+if not os.path.isdir(metrics_path):
+    os.makedirs(metrics_path)
+
+# containers for performance metrics collected for each strategy
+metrics = {
+    'peak_import_power': {},
+    'peak_energy_demand': {},
+    'aggregate_waiting_time': {},
+    'waiting_times': {},  # list of waiting times per EV
+    'time_to_full_charge': {}  # list of times to full charge per EV
+}
 
 def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                 Pnet_market, storage_assets, N_ESs,\
@@ -146,6 +162,88 @@ def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
     plt.text(0.02, 0.9, title, transform=ax.transAxes, fontsize=12)
     plt.savefig(join(path_string, normpath('Vmin_'  + str(x) + save_suffix)),
                 bbox_inches='tight')
+
+def record_metrics(strategy, storage_assets, P_import_ems, P_demand_ems,
+                   ta_EVs, td_EVs, dt, dt_ems, Emax_EV):
+    """Collect performance metrics for a strategy."""
+    N_EVs = len(storage_assets)
+    t_a = (ta_EVs * dt_ems / dt).astype(int)
+    t_d = (td_EVs * dt_ems / dt).astype(int)
+
+    waiting_times = []
+    time_to_full = []
+    for i in range(N_EVs):
+        power_i = storage_assets[i].Pnet
+        arrival = t_a[i]
+        departure = min(t_d[i], len(power_i))
+        charging_idx = np.where(power_i[arrival:departure] > 0)[0]
+        if charging_idx.size == 0:
+            waiting_times.append((departure - arrival) * dt)
+        else:
+            waiting_times.append(charging_idx[0] * dt)
+
+        energy_i = storage_assets[i].E
+        full_idx = np.where(energy_i[arrival:] >= Emax_EV - 1e-3)[0]
+        if full_idx.size == 0:
+            time_to_full.append(np.nan)
+        else:
+            time_to_full.append(full_idx[0] * dt)
+
+    metrics['peak_import_power'][strategy] = np.max(P_import_ems)
+    metrics['peak_energy_demand'][strategy] = np.max(P_demand_ems)
+    metrics['waiting_times'][strategy] = waiting_times
+    metrics['aggregate_waiting_time'][strategy] = np.nansum(waiting_times)
+    metrics['time_to_full_charge'][strategy] = time_to_full
+
+
+def plot_performance_metrics(metrics, path):
+    """Create comparative plots for collected metrics."""
+    strategies = list(metrics['peak_import_power'].keys())
+    if not strategies:
+        return
+
+    def bar_plot(values_dict, ylabel, filename):
+        vals = [values_dict[s] for s in strategies]
+        plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
+        plt.bar(strategies, vals)
+        plt.ylabel(ylabel)
+        plt.xlabel('Strategy')
+        plt.tight_layout()
+        plt.savefig(join(path, normpath(filename + save_suffix)), bbox_inches='tight')
+        plt.close()
+
+    bar_plot(metrics['peak_import_power'], 'Peak Import Power (kW)',
+             'peak_import_power')
+    bar_plot(metrics['peak_energy_demand'], 'Peak Energy Demand (kW)',
+             'peak_energy_demand')
+    bar_plot(metrics['aggregate_waiting_time'], 'Aggregate Waiting Time (h)',
+             'aggregate_waiting_time')
+
+    plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
+    plt.boxplot([metrics['waiting_times'][s] for s in strategies], labels=strategies)
+    plt.ylabel('Waiting Time per EV (h)')
+    plt.tight_layout()
+    plt.savefig(join(path, normpath('waiting_time_per_ev' + save_suffix)),
+                bbox_inches='tight')
+    plt.close()
+
+    data = []
+    labels = []
+    for s in strategies:
+        arr = np.array(metrics['time_to_full_charge'][s], dtype=float)
+        arr = arr[~np.isnan(arr)]
+        if arr.size:
+            data.append(arr)
+            labels.append(s)
+    if data:
+        plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
+                   edgecolor='k')
+        plt.boxplot(data, labels=labels)
+        plt.ylabel('Time to Full Charge (h)')
+        plt.tight_layout()
+        plt.savefig(join(path, normpath('time_to_full_charge' + save_suffix)),
+                    bbox_inches='tight')
+        plt.close()
 
 
 if run_opt ==1:
@@ -514,7 +612,7 @@ if run_opt ==1:
         if x == "edf":
             P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy() #copy of each EV and its state of charge
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
+            t_a_dt = (ta_EVs * dt_ems / dt).astype(int) #time arrival/departure
             t_d_dt = (td_EVs * dt_ems / dt).astype(int)
             for t in range(T):
                 t_ems = int(t / (dt_ems / dt))
@@ -604,6 +702,10 @@ if run_opt ==1:
         P_export_ems = output['P_export_ems']
         P_ES_ems = output['P_ES_ems']
         P_demand_ems = output['P_demand_ems']
+
+
+        record_metrics(x, storage_assets, P_import_ems, P_demand_ems,
+                        ta_EVs, td_EVs, dt, dt_ems, Emax_EV)
         
         Pnet_market = np.zeros(T)
         for t in range(T):
@@ -691,6 +793,7 @@ if run_opt ==1:
         figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                     Pnet_market, storage_assets, N_ESs,\
                     nondispatch_assets, time_ems, time, timeE, buses_Vpu)
+    plot_performance_metrics(metrics, metrics_path)
 
 # Load pickled data and plot
 else:
