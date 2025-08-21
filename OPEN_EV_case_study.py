@@ -202,6 +202,20 @@ def plot_performance_metrics(metrics, path):
     if not strategies:
         return
 
+    print("Performance metrics:")
+    for s in strategies:
+        print(f"Strategy '{s}':")
+        print(f"  Peak import power: {metrics['peak_import_power'][s]}")
+        print(f"  Peak energy demand: {metrics['peak_energy_demand'][s]}")
+        print(f"  Aggregate waiting time: {metrics['aggregate_waiting_time'][s]}")
+        waiting_times = metrics['waiting_times'][s]
+        if waiting_times:
+            print(f"  Average waiting time: {np.nanmean(waiting_times)}")
+        time_to_full = metrics['time_to_full_charge'][s]
+        if time_to_full:
+            print(f"  Average time to full charge: {np.nanmean(time_to_full)}")
+        print()
+
     def bar_plot(values_dict, ylabel, filename):
         vals = [values_dict[s] for s in strategies]
         plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
