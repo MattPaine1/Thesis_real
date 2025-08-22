@@ -63,7 +63,8 @@ metrics = {
     'peak_energy_demand': {},
     'aggregate_waiting_time': {},
     'waiting_times': {},  # list of waiting times per EV
-    'time_to_full_charge': {}  # list of times to full charge per EV
+    'energy_deficits': {},  # energy deficit per EV at departure (kWh)
+    'aggregate_energy_deficit': {}
 }
 
 def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
@@ -189,7 +190,7 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
     t_d = (td_EVs * dt_ems / dt).astype(int)
 
     waiting_times = []
-    time_to_full = []
+    energy_deficits = []
     for i in range(N_EVs):
         power_i = storage_assets[i].Pnet
         arrival = t_a[i]
@@ -201,18 +202,16 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
             waiting_times.append(charging_idx[0] * dt)
 
         energy_i = storage_assets[i].E
-        full_idx = np.where(energy_i[arrival:] >= Emax_EV - 1e-3)[0]
-        if full_idx.size == 0:
-            time_to_full.append(np.nan)
-        else:
-            time_to_full.append(full_idx[0] * dt)
+        departure_energy = energy_i[min(departure, len(energy_i) - 1)]
+        energy_deficits.append(max(Emax_EV - departure_energy, 0))
 
     # Peak metrics computed at the finest simulation resolution
     metrics['peak_import_power'][strategy] = np.max(P_import)
     metrics['peak_energy_demand'][strategy] = np.max(P_demand)
     metrics['waiting_times'][strategy] = waiting_times
     metrics['aggregate_waiting_time'][strategy] = np.nansum(waiting_times)
-    metrics['time_to_full_charge'][strategy] = time_to_full
+    metrics['energy_deficits'][strategy] = energy_deficits
+    metrics['aggregate_energy_deficit'][strategy] = np.nansum(energy_deficits)
 
 
 def plot_performance_metrics(metrics, path):
@@ -230,9 +229,10 @@ def plot_performance_metrics(metrics, path):
         waiting_times = metrics['waiting_times'][s]
         if waiting_times:
             print(f"  Average waiting time: {np.nanmean(waiting_times)}")
-        time_to_full = metrics['time_to_full_charge'][s]
-        if time_to_full:
-            print(f"  Average time to full charge: {np.nanmean(time_to_full)}")
+        energy_deficits = metrics['energy_deficits'][s]
+        if energy_deficits:
+            print(f"  Average energy deficit: {np.nanmean(energy_deficits)}")
+            print(f"  Aggregate energy deficit: {metrics['aggregate_energy_deficit'][s]}")
         print()
 
     def bar_plot(values_dict, ylabel, filename):
@@ -274,6 +274,8 @@ def plot_performance_metrics(metrics, path):
              'import_power_minus_demand')
     bar_plot(metrics['aggregate_waiting_time'], 'Aggregate Waiting Time (h)',
              'aggregate_waiting_time')
+    bar_plot(metrics['aggregate_energy_deficit'], 'Aggregate Energy Deficit (kWh)',
+             'aggregate_energy_deficit')
 
     plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
     plt.boxplot([metrics['waiting_times'][s] for s in strategies], labels=strategies)
@@ -286,7 +288,7 @@ def plot_performance_metrics(metrics, path):
     data = []
     labels = []
     for s in strategies:
-        arr = np.array(metrics['time_to_full_charge'][s], dtype=float)
+        arr = np.array(metrics['energy_deficits'][s], dtype=float)
         arr = arr[~np.isnan(arr)]
         if arr.size:
             data.append(arr)
@@ -295,9 +297,9 @@ def plot_performance_metrics(metrics, path):
         plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
                    edgecolor='k')
         plt.boxplot(data, labels=labels)
-        plt.ylabel('Time to Full Charge (h)')
+        plt.ylabel('Energy Deficit at Departure (kWh)')
         plt.tight_layout()
-        plt.savefig(join(path, normpath('time_to_full_charge' + save_suffix)),
+        plt.savefig(join(path, normpath('energy_deficit_per_ev' + save_suffix)),
                     bbox_inches='tight')
         plt.close()
 
