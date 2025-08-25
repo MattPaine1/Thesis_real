@@ -223,16 +223,24 @@ def plot_performance_metrics(metrics, path):
     print("Performance metrics:")
     for s in strategies:
         print(f"Strategy '{s}':")
-        print(f"  Peak import power: {metrics['peak_import_power'][s]}")
-        print(f"  Peak energy demand: {metrics['peak_energy_demand'][s]}")
-        print(f"  Aggregate waiting time: {metrics['aggregate_waiting_time'][s]}")
+        peak_import = metrics['peak_import_power'][s]
+        peak_demand = metrics['peak_energy_demand'][s]
+        additional_import = peak_import - peak_demand
+        print(f"  Peak Import Power: {peak_import} kW")
+        print(f"  Peak Energy Demand: {peak_demand} kW")
+        print(f"  Additional Imported Power: {additional_import} kW")
+        aggregate_wait = metrics['aggregate_waiting_time'][s]
+        print(f"  Aggregate Waiting Time: {aggregate_wait} h")
         waiting_times = metrics['waiting_times'][s]
         if waiting_times:
-            print(f"  Average waiting time: {np.nanmean(waiting_times)}")
+            avg_wait = np.nanmean(waiting_times)
+            print(f"  Average Waiting Time per EV: {avg_wait} h")
         energy_deficits = metrics['energy_deficits'][s]
         if energy_deficits:
-            print(f"  Average energy deficit: {np.nanmean(energy_deficits)}")
-            print(f"  Aggregate energy deficit: {metrics['aggregate_energy_deficit'][s]}")
+            avg_deficit = np.nanmean(energy_deficits)
+            agg_deficit = metrics['aggregate_energy_deficit'][s]
+            print(f"  Average Energy Deficit at Departure: {avg_deficit} kWh")
+            print(f"  Aggregate Energy Deficit: {agg_deficit} kWh")
         print()
 
     def bar_plot(values_dict, ylabel, filename):
@@ -802,8 +810,7 @@ if run_opt ==1:
         
         #energy cost
         energy_cost = market.calculate_revenue(Pnet_market,dt)
-        energy_cost_string = 'Total energy cost: £ %.2f' %(-1*energy_cost)
-        print(energy_cost_string)
+        print(f'Total energy cost: £ {-1*energy_cost}')
         
         #save the data
         if x == "open_loop":
