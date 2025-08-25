@@ -381,11 +381,21 @@ if run_opt ==1:
     # market and EMS have the same time-series
     dt_market = dt_ems
     T_market = T_ems
-    
+    n_per_market = int(dt_market / dt)
+
     # Import and Export Prices
-    prices_export = 0.05*np.ones(T_market)  #(£/kWh)
-    prices_import = 0.15*np.ones(T_market)  #(£/kWh)
-    demand_charge = 0.1 # (£/kW) for the maximum demand
+    price_df = pd.read_csv(
+        "NEMPRICEANDDEMAND_NSW1_202508231510.csv",
+        parse_dates=["Settlement Date"],
+        dayfirst=True,
+    ).set_index("Settlement Date")
+    start = price_df.index[0].normalize() + pd.Timedelta(days=1)  # next midnight
+    day_prices = price_df.loc[start : start + pd.Timedelta(hours=23, minutes=55)]
+
+    spot = day_prices["Spot Price ($/MWh)"].to_numpy() / 1000  # AUD/kWh
+    prices_import = spot.reshape(T_market, n_per_market).mean(axis=1)
+    prices_export = prices_import.copy()
+    demand_charge = 0.1  # (£/kW) for the maximum demand
     
     # Site Power Constraints
     Pmax_market = 100e3*np.ones(T_market)
