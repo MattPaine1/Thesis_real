@@ -67,7 +67,8 @@ metrics = {
     'aggregate_energy_deficit': {},
     'energy_variability': {},
     'total_energy_cost': {},
-    'cost_per_ev': {}
+    'cost_per_ev': {},
+    'avg_cost_per_ev': {}
 }
 
 def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
@@ -228,6 +229,7 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
     costs_per_ev = [-market.calculate_revenue(sa.Pnet, dt) for sa in storage_assets]
     metrics['total_energy_cost'][strategy] = total_cost
     metrics['cost_per_ev'][strategy] = costs_per_ev
+    metrics['avg_cost_per_ev'][strategy] = np.nanmean(costs_per_ev) if costs_per_ev else np.nan
 
 
 def plot_performance_metrics(metrics, path):
@@ -260,10 +262,9 @@ def plot_performance_metrics(metrics, path):
             print(f"  Average Energy Deficit at Departure: {avg_deficit} kWh")
             print(f"  Aggregate Energy Deficit: {agg_deficit} kWh")
         total_cost = metrics['total_energy_cost'][s]
-        print(f"  Total Energy Cost: AUD {total_cost}")
-        ev_costs = metrics['cost_per_ev'][s]
-        if ev_costs:
-            avg_ev_cost = np.nanmean(ev_costs)
+        print(f"  Total Cost: AUD {total_cost}")
+        avg_ev_cost = metrics['avg_cost_per_ev'][s]
+        if not np.isnan(avg_ev_cost):
             print(f"  Average Cost per EV: AUD {avg_ev_cost}")
         print()
 
@@ -310,8 +311,10 @@ def plot_performance_metrics(metrics, path):
              'aggregate_waiting_time')
     bar_plot(metrics['aggregate_energy_deficit'], 'Aggregate Energy Deficit (kWh)',
              'aggregate_energy_deficit')
-    bar_plot(metrics['total_energy_cost'], 'Total Energy Cost (AUD)',
-             'total_energy_cost')
+    bar_plot(metrics['avg_cost_per_ev'], 'Average Cost per EV (AUD)',
+             'avg_cost_per_ev')
+    bar_plot(metrics['total_energy_cost'], 'Total Cost (AUD)',
+             'total_cost')
 
     plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
     plt.boxplot([metrics['waiting_times'][s] for s in strategies], labels=strategies)
