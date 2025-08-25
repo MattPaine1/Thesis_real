@@ -65,7 +65,9 @@ metrics = {
     'waiting_times': {},  # list of waiting times per EV
     'energy_deficits': {},  # energy deficit per EV at departure (kWh)
     'aggregate_energy_deficit': {},
-    'energy_variability': {}
+    'energy_variability': {},
+    'total_energy_cost': {},
+    'cost_per_ev': {}
 }
 
 def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
@@ -166,7 +168,7 @@ def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                 bbox_inches='tight')
 
 def record_metrics(strategy, storage_assets, P_import, P_demand,
-                   ta_EVs, td_EVs, dt, dt_ems, Emax_EV):
+                   ta_EVs, td_EVs, dt, dt_ems, Emax_EV, market):
     """Collect performance metrics for a strategy at system resolution.
 
     The metrics include peak import power, peak demand, waiting times,
@@ -189,6 +191,8 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
         Simulation and EMS time step sizes in hours.
     Emax_EV : float
         Maximum energy capacity of the EV batteries (kWh).
+    market : MK.Market
+        Market instance containing time-varying prices.
     """
     N_EVs = len(storage_assets)
     t_a = (ta_EVs * dt_ems / dt).astype(int)
@@ -218,6 +222,12 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
     metrics['aggregate_waiting_time'][strategy] = np.nansum(waiting_times)
     metrics['energy_deficits'][strategy] = energy_deficits
     metrics['aggregate_energy_deficit'][strategy] = np.nansum(energy_deficits)
+
+    # Costs using market prices
+    total_cost = -market.calculate_revenue(P_import, dt)
+    costs_per_ev = [-market.calculate_revenue(sa.Pnet, dt) for sa in storage_assets]
+    metrics['total_energy_cost'][strategy] = total_cost
+    metrics['cost_per_ev'][strategy] = costs_per_ev
 
 
 def plot_performance_metrics(metrics, path):
@@ -249,6 +259,12 @@ def plot_performance_metrics(metrics, path):
             agg_deficit = metrics['aggregate_energy_deficit'][s]
             print(f"  Average Energy Deficit at Departure: {avg_deficit} kWh")
             print(f"  Aggregate Energy Deficit: {agg_deficit} kWh")
+        total_cost = metrics['total_energy_cost'][s]
+        print(f"  Total Energy Cost: AUD {total_cost}")
+        ev_costs = metrics['cost_per_ev'][s]
+        if ev_costs:
+            avg_ev_cost = np.nanmean(ev_costs)
+            print(f"  Average Cost per EV: AUD {avg_ev_cost}")
         print()
 
     def bar_plot(values_dict, ylabel, filename):
@@ -294,6 +310,8 @@ def plot_performance_metrics(metrics, path):
              'aggregate_waiting_time')
     bar_plot(metrics['aggregate_energy_deficit'], 'Aggregate Energy Deficit (kWh)',
              'aggregate_energy_deficit')
+    bar_plot(metrics['total_energy_cost'], 'Total Energy Cost (AUD)',
+             'total_energy_cost')
 
     plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
     plt.boxplot([metrics['waiting_times'][s] for s in strategies], labels=strategies)
@@ -383,9 +401,21 @@ if run_opt ==1:
     T_market = T_ems
     
     # Import and Export Prices
-    prices_export = 0.05*np.ones(T_market)  #(£/kWh)
-    prices_import = 0.15*np.ones(T_market)  #(£/kWh)
-    demand_charge = 0.1 # (£/kW) for the maximum demand
+    price_df = pd.read_csv("NEMPRICEANDDEMAND_NSW1_202508231510.csv")
+    spot = price_df["Spot Price ($/MWh)"].to_numpy() / 1000  # AUD/kWh
+    n_per_market = int(dt_market / dt)
+    required = T_market * n_per_market
+    if len(spot) < required:
+        raise ValueError("Insufficient spot price data for simulation horizon")
+    spot = spot[:required]
+    prices_import = spot.reshape(T_market, n_per_market).mean(axis=1)
+    prices_export = prices_import.copy()
+    demand_charge = 0.1  # (AUD/kW) for the maximum demand
+
+    # Original fixed-price strategy (GBP) for reference
+    # prices_export = 0.05*np.ones(T_market)  #(£/kWh)
+    # prices_import = 0.15*np.ones(T_market)  #(£/kWh)
+    # demand_charge = 0.1  # (£/kW) for the maximum demand
     
     # Site Power Constraints
     Pmax_market = 100e3*np.ones(T_market)
@@ -792,7 +822,7 @@ if run_opt ==1:
             P_demand += sa.Pnet
 
         record_metrics(x, storage_assets, Pnet_market, P_demand,
-                        ta_EVs, td_EVs, dt, dt_ems, Emax_EV)
+                        ta_EVs, td_EVs, dt, dt_ems, Emax_EV, market)
         
         buses_Vpu = np.zeros([T,N_buses,N_phases])
         for t in range(T):
@@ -820,7 +850,7 @@ if run_opt ==1:
         
         #energy cost
         energy_cost = market.calculate_revenue(Pnet_market,dt)
-        print(f'Total energy cost: £ {-1*energy_cost}')
+        print(f'Total energy cost: AUD {-1*energy_cost}')
         
         #save the data
         if x == "open_loop":
