@@ -64,7 +64,8 @@ metrics = {
     'aggregate_waiting_time': {},
     'waiting_times': {},  # list of waiting times per EV
     'energy_deficits': {},  # energy deficit per EV at departure (kWh)
-    'aggregate_energy_deficit': {}
+    'aggregate_energy_deficit': {},
+    'energy_variability': {}
 }
 
 def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
@@ -168,6 +169,10 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
                    ta_EVs, td_EVs, dt, dt_ems, Emax_EV):
     """Collect performance metrics for a strategy at system resolution.
 
+    The metrics include peak import power, peak demand, waiting times,
+    aggregate energy deficit, and an energy variability metric calculated as
+    the difference between the maximum imported power and the minimum demand.
+
     Parameters
     ----------
     strategy : str
@@ -208,6 +213,7 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
     # Peak metrics computed at the finest simulation resolution
     metrics['peak_import_power'][strategy] = np.max(P_import)
     metrics['peak_energy_demand'][strategy] = np.max(P_demand)
+    metrics['energy_variability'][strategy] = np.max(P_import) - np.min(P_demand)
     metrics['waiting_times'][strategy] = waiting_times
     metrics['aggregate_waiting_time'][strategy] = np.nansum(waiting_times)
     metrics['energy_deficits'][strategy] = energy_deficits
@@ -226,9 +232,11 @@ def plot_performance_metrics(metrics, path):
         peak_import = metrics['peak_import_power'][s]
         peak_demand = metrics['peak_energy_demand'][s]
         additional_import = peak_import - peak_demand
+        energy_var = metrics['energy_variability'][s]
         print(f"  Peak Import Power: {peak_import} kW")
         print(f"  Peak Energy Demand: {peak_demand} kW")
         print(f"  Additional Imported Power: {additional_import} kW")
+        print(f"  Energy Variability: {energy_var} kW")
         aggregate_wait = metrics['aggregate_waiting_time'][s]
         print(f"  Aggregate Waiting Time: {aggregate_wait} h")
         waiting_times = metrics['waiting_times'][s]
@@ -280,6 +288,8 @@ def plot_performance_metrics(metrics, path):
     # Only the additional imported power (effect of EVs)
     bar_plot(import_minus_demand, 'Additional Imported Power (kW)',
              'import_power_minus_demand')
+    bar_plot(metrics['energy_variability'], 'Energy Variability (kW)',
+             'energy_variability')
     bar_plot(metrics['aggregate_waiting_time'], 'Aggregate Waiting Time (h)',
              'aggregate_waiting_time')
     bar_plot(metrics['aggregate_energy_deficit'], 'Aggregate Energy Deficit (kWh)',
