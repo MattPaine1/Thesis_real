@@ -384,8 +384,11 @@ if run_opt ==1:
     n_per_market = int(dt_market / dt)
 
     # Import and Export Prices
+    price_data_path = os.path.join(
+        "Data", "NEMPRICEANDDEMAND_NSW1_202508231510.csv"
+    )
     price_df = pd.read_csv(
-        "NEMPRICEANDDEMAND_NSW1_202508231510.csv",
+        price_data_path,
         parse_dates=["Settlement Date"],
         dayfirst=True,
     ).set_index("Settlement Date")
