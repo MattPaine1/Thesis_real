@@ -44,7 +44,7 @@ run_opt = 1
 # Added heuristic strategies 'tou' (time-of-use rule) and 'valley'
 # (valley-filling greedy)
 # opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp']
-opt_type = ['open_loop', 'uncontrolled', 'edf', 'tou', 'valley', 'lp']
+opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp']
 
 
 path_string = normpath('Results/EV_Case_Study/')
