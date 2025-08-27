@@ -131,14 +131,19 @@ class Market:
             Total revenue generated during simulation
 
         """
-        #convert import power to the market time-series
+        # Remove any NaN values before aggregation
+        P_import_tot = np.nan_to_num(P_import_tot)
+
+        # Convert import power to the market time-series
         P_import_market = np.zeros(self.T_market)
         for t_market in range(self.T_market):
             t_indexes = (t_market*self.dt_market/dt \
-                         + np.arange(0,self.dt_market/dt)).astype(int)
-            P_import_market[t_market] = np.mean(P_import_tot[t_indexes])
-        #calcuate the revenue
-        P_max_demand = np.max(P_import_market)
+                         + np.arange(0, self.dt_market/dt)).astype(int)
+            P_import_market[t_market] = np.nanmean(P_import_tot[t_indexes])
+        P_import_market = np.nan_to_num(P_import_market)
+
+        # Calculate the revenue using NaN-safe operations
+        P_max_demand = np.nanmax(P_import_market)
         P_import = np.maximum(P_import_market,0)
         P_export = np.maximum(-P_import_market,0)
         revenue = -self.demand_charge*P_max_demand+\
