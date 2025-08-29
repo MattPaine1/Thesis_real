@@ -846,7 +846,7 @@ if run_opt ==1:
                         break
                     P_ch = min(required_power, P_avail)
                     if P_ch < min_chunk:
-                        break
+                        continue
                     P_ESs[t, i] = P_ch
                     E_state[i] += P_ch * dt
                     P_avail -= P_ch
@@ -909,7 +909,7 @@ if run_opt ==1:
                         required_power = objs[i][3]
                         P_ch = min(required_power, P_avail)
                         if P_ch < min_chunk:
-                            break
+                            continue
                         P_ESs[t, i] = P_ch
                         E_state[i] += P_ch * dt
                         P_avail -= P_ch
