@@ -806,7 +806,7 @@ if run_opt ==1:
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "composite":
-            # Composite score strategy with network constraints
+            # Composite score strategy with network and demand feedback
             P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy()
             t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
@@ -816,12 +816,16 @@ if run_opt ==1:
             w_wait = 1 / 3
             w_req = 1 / 3
             w_price = 1 / 3
+            base_mean = np.mean(P_demand_base)
+            min_chunk = 0.1 * P_max_EV
             for t in range(T):
                 t_ems = int(t / (dt_ems / dt))
-                P_avail = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+                P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+                P_valley = max(base_mean - P_demand_base[t], 0)
+                P_avail = min(P_network_cap, P_valley)
                 connected = [i for i in range(N_EVs)
                              if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV]
-                if not connected or P_avail <= 0:
+                if not connected or P_avail < min_chunk:
                     continue
                 scores = []
                 for i in connected:
@@ -829,7 +833,7 @@ if run_opt ==1:
                     wait_norm = wait / wait_max if wait_max > 0 else 0
                     deficit = Emax_EV - E_state[i]
                     remaining_time = max((t_d_dt[i] - t) * dt, dt)
-                    required_power = min(deficit / remaining_time, P_max_EV)
+                    required_power = min((deficit / dt), P_max_EV)
                     req_norm = (required_power / market.Pmax[t_ems]
                                 if market.Pmax[t_ems] > 0 else 0)
                     price_norm = (1 - market.prices_import[t_ems] / price_max
@@ -838,37 +842,41 @@ if run_opt ==1:
                     scores.append((score, required_power, i))
                 scores.sort(reverse=True)
                 for score, required_power, i in scores:
-                    P_ch = min(required_power, P_avail, P_max_EV)
-                    if P_ch <= 0:
-                        continue
+                    if P_avail < min_chunk:
+                        break
+                    P_ch = min(required_power, P_avail)
+                    if P_ch < min_chunk:
+                        break
                     P_ESs[t, i] = P_ch
                     E_state[i] += P_ch * dt
                     P_avail -= P_ch
-                    if P_avail <= 0:
-                        break
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "pareto":
-            # Pareto-based ranking strategy
+            # Pareto-based ranking strategy with demand-aware allocation
             P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy()
             t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
             t_d_dt = (td_EVs * dt_ems / dt).astype(int)
             price_max = np.max(market.prices_import)
             wait_max = 24  # hours
+            base_mean = np.mean(P_demand_base)
+            min_chunk = 0.1 * P_max_EV
             for t in range(T):
                 t_ems = int(t / (dt_ems / dt))
-                P_avail = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+                P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+                P_valley = max(base_mean - P_demand_base[t], 0)
+                P_avail = min(P_network_cap, P_valley)
                 connected = [i for i in range(N_EVs)
                              if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV]
-                if not connected or P_avail <= 0:
+                if not connected or P_avail < min_chunk:
                     continue
                 objs = {}
                 for i in connected:
                     wait_norm = ((t - t_a_dt[i]) * dt) / wait_max if wait_max > 0 else 0
                     deficit = Emax_EV - E_state[i]
                     remaining_time = max((t_d_dt[i] - t) * dt, dt)
-                    required_power = min(deficit / remaining_time, P_max_EV)
+                    required_power = min((deficit / dt), P_max_EV)
                     req_norm = (required_power / market.Pmax[t_ems]
                                 if market.Pmax[t_ems] > 0 else 0)
                     cost_norm = (market.prices_import[t_ems] / price_max
@@ -896,16 +904,16 @@ if run_opt ==1:
                 for front in fronts:
                     front.sort(key=lambda i: objs[i][1], reverse=True)
                     for i in front:
+                        if P_avail < min_chunk:
+                            break
                         required_power = objs[i][3]
-                        P_ch = min(required_power, P_avail, P_max_EV)
-                        if P_ch <= 0:
-                            continue
+                        P_ch = min(required_power, P_avail)
+                        if P_ch < min_chunk:
+                            break
                         P_ESs[t, i] = P_ch
                         E_state[i] += P_ch * dt
                         P_avail -= P_ch
-                        if P_avail <= 0:
-                            break
-                    if P_avail <= 0:
+                    if P_avail < min_chunk:
                         break
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
