@@ -45,8 +45,13 @@ run_opt = 1
 # (valley-filling greedy) and new composite and Pareto-based strategies
 # opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp',
 #             'composite', 'pareto']
+# include soft-valley variants for composite and Pareto strategies
 opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp',
-            'composite', 'pareto']
+            'composite', 'pareto', 'composite_soft', 'pareto_soft']
+
+# softness factor (0–1) for valley-filling in ``*_soft`` strategies
+# 0 ignores valleys entirely, 1 enforces them as a hard limit
+valley_softness = 1.0
 
 
 path_string = normpath('Results/EV_Case_Study/')
@@ -865,6 +870,54 @@ if run_opt ==1:
                     P_avail -= P_ch
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
+        if x == "composite_soft":
+            # Composite strategy with adjustable valley softness
+            P_ESs = np.zeros((T, N_ESs))
+            E_state = E0_EVs.copy()
+            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
+            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            price_max = np.max(market.prices_import)
+            wait_max = 24  # hours
+            w_wait = 1 / 3
+            w_req = 1 / 3
+            w_price = 1 / 3
+            base_mean = np.mean(P_demand_base)
+            min_chunk = 0.1 * P_max_EV
+            for t in range(T):
+                t_ems = int(t / (dt_ems / dt))
+                P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+                P_valley = (base_mean - P_demand_base[t]) * valley_softness
+                P_valley = max(P_valley, 0)
+                P_avail = min(P_network_cap, P_valley)
+                connected = [i for i in range(N_EVs)
+                             if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV]
+                if not connected or P_avail < min_chunk:
+                    continue
+                scores = []
+                for i in connected:
+                    wait = (t - t_a_dt[i]) * dt
+                    wait_norm = wait / wait_max if wait_max > 0 else 0
+                    deficit = Emax_EV - E_state[i]
+                    remaining_time = max((t_d_dt[i] - t) * dt, dt)
+                    required_power = min((deficit / dt), P_max_EV)
+                    req_norm = (required_power / market.Pmax[t_ems]
+                                if market.Pmax[t_ems] > 0 else 0)
+                    price_norm = (1 - market.prices_import[t_ems] / price_max
+                                  if price_max > 0 else 0)
+                    score = w_wait * wait_norm + w_req * req_norm + w_price * price_norm
+                    scores.append((score, required_power, i))
+                scores.sort(reverse=True)
+                for score, required_power, i in scores:
+                    if P_avail < min_chunk:
+                        break
+                    P_ch = min(required_power, P_avail)
+                    if P_ch < min_chunk:
+                        continue
+                    P_ESs[t, i] = P_ch
+                    E_state[i] += P_ch * dt
+                    P_avail -= P_ch
+            output = energy_system.simulate_network_manual_dispatch(P_ESs)
+
         if x == "pareto":
             # Pareto-based ranking strategy with demand-aware allocation
             P_ESs = np.zeros((T, N_ESs))
@@ -928,6 +981,71 @@ if run_opt ==1:
                         P_avail -= P_ch
                     if P_avail < min_chunk:
                         break
+            output = energy_system.simulate_network_manual_dispatch(P_ESs)
+
+        if x == "pareto_soft":
+            # Pareto ranking with adjustable valley softness
+            P_ESs = np.zeros((T, N_ESs))
+            E_state = E0_EVs.copy()
+            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
+            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            price_max = np.max(market.prices_import)
+            wait_max = 24  # hours
+            base_mean = np.mean(P_demand_base)
+            min_chunk = 0.1 * P_max_EV
+            for t in range(T):
+                t_ems = int(t / (dt_ems / dt))
+                P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+                P_valley = (base_mean - P_demand_base[t]) * valley_softness
+                P_valley = max(P_valley, 0)
+                P_avail = min(P_network_cap, P_valley)
+                connected = [i for i in range(N_EVs)
+                             if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV]
+                if not connected or P_avail < min_chunk:
+                    continue
+                objs = {}
+                for i in connected:
+                    wait_norm = ((t - t_a_dt[i]) * dt) / wait_max if wait_max > 0 else 0
+                    deficit = Emax_EV - E_state[i]
+                    remaining_time = max((t_d_dt[i] - t) * dt, dt)
+                    required_power = min((deficit / dt), P_max_EV)
+                    req_norm = (required_power / market.Pmax[t_ems]
+                                if market.Pmax[t_ems] > 0 else 0)
+                    cost_norm = (market.prices_import[t_ems] / price_max
+                                 if price_max > 0 else 0)
+                    objs[i] = (wait_norm, req_norm, cost_norm, required_power)
+                remaining = set(connected)
+                fronts = []
+                while remaining:
+                    front = []
+                    for i in remaining:
+                        dominated = False
+                        for j in remaining:
+                            if i == j:
+                                continue
+                            if (objs[j][0] >= objs[i][0] and objs[j][1] >= objs[i][1]
+                                    and objs[j][2] <= objs[i][2]
+                                    and (objs[j][0] > objs[i][0]
+                                         or objs[j][1] > objs[i][1]
+                                         or objs[j][2] < objs[i][2])):
+                                dominated = True
+                                break
+                        if not dominated:
+                            front.append(i)
+                    fronts.append(front)
+                    remaining -= set(front)
+                for front in fronts:
+                    front.sort(key=lambda i: objs[i][2])
+                    for i in front:
+                        if P_avail < min_chunk:
+                            break
+                        required_power = objs[i][3]
+                        P_ch = min(required_power, P_avail)
+                        if P_ch < min_chunk:
+                            continue
+                        P_ESs[t, i] = P_ch
+                        E_state[i] += P_ch * dt
+                        P_avail -= P_ch
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "lp":
@@ -1044,6 +1162,18 @@ if run_opt ==1:
                             Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
                             time_ems, time, timeE, buses_Vpu)
             pickle.dump(pickled_data_PAR, open(join(path_string, normpath("EV_case_data_pareto.p")), "wb"))
+
+        if x == "composite_soft":
+            pickled_data_COMP_SOFT = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
+                            Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
+                            time_ems, time, timeE, buses_Vpu)
+            pickle.dump(pickled_data_COMP_SOFT, open(join(path_string, normpath("EV_case_data_composite_soft.p")), "wb"))
+
+        if x == "pareto_soft":
+            pickled_data_PAR_SOFT = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
+                            Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
+                            time_ems, time, timeE, buses_Vpu)
+            pickle.dump(pickled_data_PAR_SOFT, open(join(path_string, normpath("EV_case_data_pareto_soft.p")), "wb"))
         
         
         figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
@@ -1080,6 +1210,12 @@ else:
 
         if x == "pareto":
             import_data = pickle.load(open(join(path_string, normpath("EV_case_data_pareto.p")), "rb"))
+
+        if x == "composite_soft":
+            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_composite_soft.p")), "rb"))
+
+        if x == "pareto_soft":
+            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_pareto_soft.p")), "rb"))
 
         N_EVs = import_data[0]
         P_demand_base_pred_ems = import_data[1]
