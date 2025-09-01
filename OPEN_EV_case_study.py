@@ -67,6 +67,7 @@ metrics = {
     'waiting_times': {},  # list of waiting times per EV
     'energy_deficits': {},  # energy deficit per EV at departure (kWh)
     'aggregate_energy_deficit': {},
+    'num_undercharged': {},  # number of EVs with deficit above tolerance
     'energy_variability': {},
     'total_energy_cost': {},
     'cost_per_ev': {},
@@ -171,12 +172,14 @@ def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                 bbox_inches='tight')
 
 def record_metrics(strategy, storage_assets, P_import, P_demand,
-                   ta_EVs, td_EVs, dt, dt_ems, Emax_EV, market):
+                   ta_EVs, td_EVs, dt, dt_ems, Emax_EV, market,
+                   tolerance=0):
     """Collect performance metrics for a strategy at system resolution.
 
     The metrics include peak import power, peak demand, waiting times,
-    aggregate energy deficit, and an energy variability metric calculated as
-    the difference between the maximum imported power and the minimum demand.
+    aggregate energy deficit, number of undercharged EVs (with deficit above
+    ``tolerance``), and an energy variability metric calculated as the
+    difference between the maximum imported power and the minimum demand.
 
     Parameters
     ----------
@@ -196,6 +199,9 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
         Maximum energy capacity of the EV batteries (kWh).
     market : MK.Market
         Market instance containing time-varying prices.
+    tolerance : float, optional
+        Energy deficit threshold below which an EV is considered fully
+        charged. Defaults to 0 kWh.
     """
     N_EVs = len(storage_assets)
     t_a = (ta_EVs * dt_ems / dt).astype(int)
@@ -217,6 +223,8 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
         departure_energy = energy_i[min(departure, len(energy_i) - 1)]
         energy_deficits.append(max(Emax_EV - departure_energy, 0))
 
+    num_undercharged = sum(deficit > tolerance for deficit in energy_deficits)
+
     # Peak metrics computed at the finest simulation resolution
     metrics['peak_import_power'][strategy] = np.max(P_import)
     metrics['peak_energy_demand'][strategy] = np.max(P_demand)
@@ -225,6 +233,7 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
     metrics['aggregate_waiting_time'][strategy] = np.nansum(waiting_times)
     metrics['energy_deficits'][strategy] = energy_deficits
     metrics['aggregate_energy_deficit'][strategy] = np.nansum(energy_deficits)
+    metrics['num_undercharged'][strategy] = num_undercharged
 
     # Costs using market prices
     total_cost = -market.calculate_revenue(P_import, dt)
@@ -263,6 +272,8 @@ def plot_performance_metrics(metrics, path):
             agg_deficit = metrics['aggregate_energy_deficit'][s]
             print(f"  Average Energy Deficit at Departure: {avg_deficit} kWh")
             print(f"  Aggregate Energy Deficit: {agg_deficit} kWh")
+        num_under = metrics['num_undercharged'][s]
+        print(f"  Number of Undercharged EVs: {num_under}")
         total_cost = metrics['total_energy_cost'][s]
         print(f"  Total Cost: AUD {total_cost}")
         avg_ev_cost = metrics['avg_cost_per_ev'][s]
@@ -313,6 +324,8 @@ def plot_performance_metrics(metrics, path):
              'aggregate_waiting_time')
     bar_plot(metrics['aggregate_energy_deficit'], 'Aggregate Energy Deficit (kWh)',
              'aggregate_energy_deficit')
+    bar_plot(metrics['num_undercharged'], 'Number of Undercharged EVs',
+             'num_undercharged')
     bar_plot(metrics['avg_cost_per_ev'], 'Average Cost per EV (AUD)',
              'avg_cost_per_ev')
     bar_plot(metrics['total_energy_cost'], 'Total Cost (AUD)',
