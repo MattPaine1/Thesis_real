@@ -38,42 +38,37 @@ __version__ = "1.0.0"
 ### RUN OPT OR JUST PLOT (IF RESULTS PICKLED)
 ################################################
 
-# run all optimisation/heuristic strategies
+# run all optimisation/heuristic strats
 run_opt = 1
-# list of strategies to evaluate
-# Added heuristic strategies 'tou' (time-of-use rule) and 'valley'
-# (valley-filling greedy) and new composite and Pareto-based strategies
+# list of strats to evaluate
 # opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp',
 #             'composite', 'pareto']
-# include soft-valley variants for composite and Pareto strategies
-opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp',
+opt_type = ['open_loop', 'uncontrolled', 'edf', 'tou', 'valley', 'lp',
             'composite', 'pareto', 'composite_soft', 'pareto_soft']
 
-# softness factor (0–1) for valley-filling in ``*_soft`` strategies
-# 0 ignores valleys entirely, 1 enforces them as a hard limit
-valley_softness = 1.0
-
+# valley softness determines how soft the valley-filling objective is. 1 is max
+valley_softness = 0.5
 
 path_string = normpath('Results/EV_Case_Study/')
 if not os.path.isdir(path_string):
     os.makedirs(path_string)
 save_suffix = '.pdf'
 
-# folder for performance metric plots
+# folder to store performance metrics graphs
 metrics_path = join(path_string, 'performance_metrics')
 if not os.path.isdir(metrics_path):
     os.makedirs(metrics_path)
 
-# containers for performance metrics collected for each strategy
+# Define each metric to be measured
 metrics = {
-    'peak_import_power': {},
-    'peak_energy_demand': {},
-    'aggregate_waiting_time': {},
+    'peak_import_power': {}, # peak power imported by the EVs
+    'peak_energy_demand': {}, # peak energy demand in network with EVs 
+    'aggregate_waiting_time': {}, # total waiting time of all EVs
     'waiting_times': {},  # list of waiting times per EV
     'energy_deficits': {},  # energy deficit per EV at departure (kWh)
     'aggregate_energy_deficit': {},
     'num_undercharged': {},  # number of EVs with deficit above tolerance
-    'energy_variability': {},
+    'energy_variability': {}, #differnence between peak import and min demand
     'total_energy_cost': {},
     'cost_per_ev': {},
     'avg_cost_per_ev': {}
@@ -177,63 +172,34 @@ def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                 bbox_inches='tight')
 
 def record_metrics(strategy, storage_assets, P_import, P_demand,
-                   ta_EVs, td_EVs, dt, dt_ems, Emax_EV, market,
+                   tarriv_EVs, tdepart_EVs, dt, dt_ems, Emax_EV, market,
                    tolerance=0):
-    """Collect performance metrics for a strategy at system resolution.
 
-    The metrics include peak import power, peak demand, waiting times,
-    aggregate energy deficit, number of undercharged EVs (with deficit above
-    ``tolerance``), and an energy variability metric calculated as the
-    difference between the maximum imported power and the minimum demand.
-
-    Parameters
-    ----------
-    strategy : str
-        Name of the control strategy being evaluated.
-    storage_assets : list
-        List of storage assets (EVs) in the system.
-    P_import : ndarray
-        Net power imported from the grid at the simulation time step (kW).
-    P_demand : ndarray
-        System power demand at the simulation time step (kW).
-    ta_EVs, td_EVs : ndarray
-        EV arrival and departure times (EMS resolution).
-    dt, dt_ems : float
-        Simulation and EMS time step sizes in hours.
-    Emax_EV : float
-        Maximum energy capacity of the EV batteries (kWh).
-    market : MK.Market
-        Market instance containing time-varying prices.
-    tolerance : float, optional
-        Energy deficit threshold below which an EV is considered fully
-        charged. Defaults to 0 kWh.
-    """
-    N_EVs = len(storage_assets)
-    t_a = (ta_EVs * dt_ems / dt).astype(int)
-    t_d = (td_EVs * dt_ems / dt).astype(int)
-
-    waiting_times = []
+    # function to record mentrics for every strategy          
+    N_EVs = len(storage_assets) # number of EVs
+    t_arriv = (tarriv_EVs * dt_ems / dt).astype(int) # convert time of arrival and departure
+    t_depart = (tdepart_EVs * dt_ems / dt).astype(int)
+    waiting_times = [] 
     energy_deficits = []
-    for i in range(N_EVs):
+    for i in range(N_EVs): # for every Ev store key stats
         power_i = storage_assets[i].Pnet
-        arrival = t_a[i]
-        departure = min(t_d[i], len(power_i))
-        charging_idx = np.where(power_i[arrival:departure] > 0)[0]
-        if charging_idx.size == 0:
-            waiting_times.append((departure - arrival) * dt)
+        arrival = t_arriv[i]
+        departure =min(t_depart[i],len(power_i))
+        charging_array = np.where(power_i[arrival:departure] > 0)[0]
+        if charging_array.size == 0: # if no charging
+            waiting_times.append((departure -arrival) * dt)
         else:
-            waiting_times.append(charging_idx[0] * dt)
-
-        energy_i = storage_assets[i].E
-        departure_energy = energy_i[min(departure, len(energy_i) - 1)]
+            waiting_times.append(charging_array[0] *dt) # waiting time in hours
+        energy_i = storage_assets[i].E # rest of metrics
+        departure_energy = energy_i[min(departure,len(energy_i) - 1)]
         energy_deficits.append(max(Emax_EV - departure_energy, 0))
 
-    num_undercharged = sum(deficit > tolerance for deficit in energy_deficits)
+    num_undercharged = sum(deficit > tolerance for deficit in energy_deficits) # not functional at the moment
 
-    # Peak metrics computed at the finest simulation resolution
+    # metrics
     metrics['peak_import_power'][strategy] = np.max(P_import)
     metrics['peak_energy_demand'][strategy] = np.max(P_demand)
-    metrics['energy_variability'][strategy] = np.max(P_import) - np.min(P_demand)
+    metrics['energy_variability'][strategy] = np.max(P_import)-np.min(P_demand)
     metrics['waiting_times'][strategy] = waiting_times
     metrics['aggregate_waiting_time'][strategy] = np.nansum(waiting_times)
     metrics['energy_deficits'][strategy] = energy_deficits
@@ -248,28 +214,27 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
     metrics['avg_cost_per_ev'][strategy] = np.nanmean(costs_per_ev) if costs_per_ev else np.nan
 
 
-def plot_performance_metrics(metrics, path):
-    """Create comparative plots for collected metrics."""
-    strategies = list(metrics['peak_import_power'].keys())
-    if not strategies:
+def plot_performance_metrics(metrics, path): #print performance metrics for all strategies
+    strats = list(metrics['peak_import_power'].keys())
+    if not strats:
         return
 
     print("Performance metrics:")
-    for s in strategies:
+    for s in strats:
         print(f"Strategy '{s}':")
-        peak_import = metrics['peak_import_power'][s]
+        peak_import =metrics['peak_import_power'][s]
         peak_demand = metrics['peak_energy_demand'][s]
-        additional_import = peak_import - peak_demand
+        additional_import = peak_import- peak_demand
         energy_var = metrics['energy_variability'][s]
         print(f"  Peak Import Power: {peak_import} kW")
         print(f"  Peak Energy Demand: {peak_demand} kW")
         print(f"  Additional Imported Power: {additional_import} kW")
         print(f"  Energy Variability: {energy_var} kW")
-        aggregate_wait = metrics['aggregate_waiting_time'][s]
+        aggregate_wait =metrics['aggregate_waiting_time'][s]
         print(f"  Aggregate Waiting Time: {aggregate_wait} h")
         waiting_times = metrics['waiting_times'][s]
-        if waiting_times:
-            avg_wait = np.nanmean(waiting_times)
+        if waiting_times: # avoid error if empty list
+            avg_wait = np.nanmean(waiting_times) # nanmean to ingnore nan values
             print(f"  Average Waiting Time per EV: {avg_wait} h")
         energy_deficits = metrics['energy_deficits'][s]
         if energy_deficits:
@@ -287,9 +252,9 @@ def plot_performance_metrics(metrics, path):
         print()
 
     def bar_plot(values_dict, ylabel, filename):
-        vals = [values_dict[s] for s in strategies]
+        vals = [values_dict[s] for s in strats]
         plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
-        plt.bar(strategies, vals)
+        plt.bar(strats, vals)
         plt.ylabel(ylabel)
         plt.xlabel('Strategy')
         plt.tight_layout()
@@ -301,16 +266,13 @@ def plot_performance_metrics(metrics, path):
     bar_plot(metrics['peak_energy_demand'], 'Peak Energy Demand (kW)',
              'peak_energy_demand')
     # Combined stacked bar: base demand and additional imported power
-    import_minus_demand = {
-        s: metrics['peak_import_power'][s] - metrics['peak_energy_demand'][s]
-        for s in strategies
-    }
-    demand_vals = [metrics['peak_energy_demand'][s] for s in strategies]
-    extra_vals = [import_minus_demand[s] for s in strategies]
+    import_minus_demand = {s: metrics['peak_import_power'][s] - metrics['peak_energy_demand'][s] for s in strats}
+    demand_vals = [metrics['peak_energy_demand'][s] for s in strats]
+    extra_vals = [import_minus_demand[s] for s in strats]
     plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
                edgecolor='k')
-    plt.bar(strategies, demand_vals, label='Peak Energy Demand')
-    plt.bar(strategies, extra_vals, bottom=demand_vals,
+    plt.bar(strats, demand_vals, label='Peak Energy Demand')
+    plt.bar(strats, extra_vals, bottom=demand_vals,
             label='Additional Imported Power', color='orange')
     plt.ylabel('Power (kW)')
     plt.xlabel('Strategy')
@@ -320,7 +282,7 @@ def plot_performance_metrics(metrics, path):
                 bbox_inches='tight')
     plt.close()
 
-    # Only the additional imported power (effect of EVs)
+    # O
     bar_plot(import_minus_demand, 'Additional Imported Power (kW)',
              'import_power_minus_demand')
     bar_plot(metrics['energy_variability'], 'Energy Variability (kW)',
@@ -337,20 +299,20 @@ def plot_performance_metrics(metrics, path):
              'total_cost')
 
     plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
-    plt.boxplot([metrics['waiting_times'][s] for s in strategies], labels=strategies)
+    plt.boxplot([metrics['waiting_times'][s] for s in strats], labels=strats)
     plt.ylabel('Waiting Time per EV (h)')
     plt.tight_layout()
     plt.savefig(join(path, normpath('waiting_time_per_ev' + save_suffix)),
                 bbox_inches='tight')
     plt.close()
-
     data = []
     labels = []
-    for s in strategies:
+    for s in strats:
         arr = np.array(metrics['energy_deficits'][s], dtype=float)
         arr = arr[~np.isnan(arr)]
         if arr.size:
             data.append(arr)
+
             labels.append(s)
     if data:
         plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
@@ -361,7 +323,6 @@ def plot_performance_metrics(metrics, path):
         plt.savefig(join(path, normpath('energy_deficit_per_ev' + save_suffix)),
                     bbox_inches='tight')
         plt.close()
-
 
 if run_opt ==1:
            
@@ -413,9 +374,9 @@ if run_opt ==1:
     # random EV initial energy levels
     E0_EVs = Emax_EV*np.random.uniform(0.2,0.9,N_EVs)
     # random EV arrival times between 6am and 9am
-    ta_EVs = np.random.randint(int(6/dt_ems),int(10/dt_ems),N_EVs) - int(T0/dt_ems)
+    tarriv_EVs = np.random.randint(int(6/dt_ems),int(10/dt_ems),N_EVs) - int(T0/dt_ems)
     # random EV departure times between 5pm and 9pm
-    td_EVs = np.random.randint(int(15/dt_ems),\
+    tdepart_EVs = np.random.randint(int(15/dt_ems),\
                                int(21/dt_ems),N_EVs) - int(T0/dt_ems)
     
     # Market parameters
@@ -443,9 +404,9 @@ if run_opt ==1:
     # prices_export = prices_import.copy()
     # demand_charge = 0.1  # (AUD/kW) for the maximum demand
 
-    # Original fixed-price strategy (GBP) for reference
-    prices_export = 0.095*np.ones(T_market)  #(£/kWh)
-    prices_import = 0.285*np.ones(T_market)  #(£/kWh)
+    # Original fixed-price strategy (AUD) for reference using conversion 
+    prices_export = 0.095*np.ones(T_market)  #($/kWh)
+    prices_import = 0.285*np.ones(T_market)  #($/kWh)
     demand_charge = 0.19  # (£/kW) for the maximum demand
     
     # Site Power Constraints
@@ -676,7 +637,7 @@ if run_opt ==1:
         Emin_ev_i = Emin_EV*np.ones(T_ems)
         Pmax_ev_i = np.zeros(T_ems)
         Pmin_ev_i = np.zeros(T_ems)
-        for t in range(ta_EVs[i],int(min(td_EVs[i],T_ems))):
+        for t in range(tarriv_EVs[i],int(min(tdepart_EVs[i],T_ems))):
             Pmax_ev_i[t] = P_max_EV
             Pmin_ev_i[t] = P_min_EV
         bus_id_ev_i = bus634_num
@@ -702,7 +663,7 @@ if run_opt ==1:
     energy_system = ES.EnergySystem(storage_assets, nondispatch_assets, network,
                                     market, dt, T, dt_ems, T_ems)
 
-    # pre-compute base demand profiles for use in heuristic controllers
+    # pre-compute base demands for strategies involving heuristics
     P_demand_base = np.zeros(T)  # actual base demand at system resolution
     P_demand_base_pred = np.zeros(T)  # predicted base demand
     for nd in nondispatch_assets:
@@ -736,35 +697,37 @@ if run_opt ==1:
         if x == "uncontrolled": 
             P_ESs = np.zeros((T, N_ESs)) #create array to EV charging power at each timestep
             for i in range(N_EVs): # for every EV
-                t_a = int(ta_EVs[i] * dt_ems / dt) #arrival time
-                t_d = int(td_EVs[i] * dt_ems / dt) # departure time
+                t_arriv = int(tarriv_EVs[i] *dt_ems /dt) #arrival time
+                t_depart = int(tdepart_EVs[i] * dt_ems / dt) # departure time
                 E = E0_EVs[i] # EV stored energy at its initial state
-                t = t_a
-                while t < t_d and E < Emax_EV: # while EV is here and not full, keep charging
+                t = t_arriv # start at arrival time
+                while t < t_depart and E < Emax_EV: # while EV is here and not full, keep charging
                     P_ESs[t, i] = P_max_EV # EV charge is at max
                     E += P_max_EV * dt
                     t += 1
-            output = energy_system.simulate_network_manual_dispatch(P_ESs)
+            output = energy_system.simulate_network_manual_dispatch(P_ESs) # run simulation with dispatch instructions
 
         if x == "edf":
             P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy() #copy of each EV and its state of charge
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int) #time arrival/departure
-            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            t_arriv_dt =(tarriv_EVs * dt_ems / dt).astype(int)#time arrival/departure
+            t_depart_dt = (tdepart_EVs * dt_ems /dt).astype(int)
+
             for t in range(T):
+                
                 t_ems = int(t / (dt_ems / dt))
                 P_avail = max(market.Pmax[t_ems] - P_demand_base[t], 0) #power available in the market
                 connected = [i for i in range(N_EVs)
-                             if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV] #list of all connected EVs at current moment needing charge
-                connected.sort(key=lambda i: t_d_dt[i]) # sort by earliest departure
+                             if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV] #list of all connected EVs at current moment needing charge
+                connected.sort(key=lambda i: t_depart_dt[i]) # sort by earliest departure
                 for i in connected: # loop through sorted list of connected EVs
                     P_need = (Emax_EV - E_state[i]) / dt # power needed to finish charging in one step if possib;e
-                    P_ch = min(P_max_EV, P_avail, P_need) # must limit charging power
-                    if P_ch <= 0: # skip if no power available to charge
+                    P_charge = min(P_max_EV,P_avail, P_need) # must limit charging power
+                    if P_charge <= 0: # skip if no power available to charge
                         continue
-                    P_ESs[t, i] = P_ch
-                    E_state[i] += P_ch * dt
-                    P_avail -= P_ch
+                    P_ESs[t, i] = P_charge
+                    E_state[i] += P_charge * dt
+                    P_avail -= P_charge
                 if P_avail <= 0:
                     break
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
@@ -772,10 +735,10 @@ if run_opt ==1:
         if x == "tou":
             # Time-of-Use heuristic: charge at max power during off-peak
             # periods or when close to departure.
-            P_ESs = np.zeros((T, N_ESs)) # matrix to store every EV at each time step
+            P_ESs = np.zeros((T,N_ESs)) # matrix to store every EV at each time step
             E_state = E0_EVs.copy()
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int) # arrival and departure time conversion to be compaatible with sim
-            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int) # arrival and departure time conversion to be compaatible with sim
+            t_depart_dt = (tdepart_EVs* dt_ems / dt).astype(int)
             safeguard = 2  # hours before departure to start charging, to avoid non-charges
             for t in range(T):
                 hour = t * dt # current hour
@@ -785,16 +748,16 @@ if run_opt ==1:
                     market.Pmax[t_ems] - P_demand_base[t] - P_ESs[t].sum(), 0
                 )
                 for i in range(N_EVs): #iterate over all evs
-                    if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV: # only consider evs that are present and not fully charged
-                        hrs_to_depart = (t_d_dt[i] - t) * dt
+                    if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV: # only consider evs that are present and not fully charged
+                        hrs_to_depart = (t_depart_dt[i] - t) * dt
                         if off_peak or hrs_to_depart <= safeguard: # if true then charge
                             P_need = (Emax_EV - E_state[i]) / dt
-                            P_ch = min(P_max_EV, P_avail, P_need) 
-                            if P_ch <= 0:
+                            P_charge = min(P_max_EV, P_avail, P_need) 
+                            if P_charge <= 0:
                                 continue
-                            P_ESs[t, i] = P_ch
-                            E_state[i] += P_ch * dt
-                            P_avail -= P_ch
+                            P_ESs[t, i] = P_charge
+                            E_state[i] += P_charge * dt
+                            P_avail -= P_charge
                             if P_avail <= 0:
                                 break
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
@@ -802,12 +765,12 @@ if run_opt ==1:
         if x == "valley":
             # Valley-filling greedy heuristic
             P_ESs = np.zeros((T, N_ESs))
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
-            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
+            t_depart_dt = (tdepart_EVs * dt_ems / dt).astype(int)
             current_load = P_demand_base_pred.copy()
             for i in range(N_EVs):
                 energy_needed = Emax_EV - E0_EVs[i] #how much energy required to be full
-                available = np.arange(t_a_dt[i], t_d_dt[i]) # when the EV is present
+                available = np.arange(t_arriv_dt[i], t_depart_dt[i]) # when the EV is present
                 # sort available times by current total load (low to high)
                 sorted_times = sorted(available, key=lambda tt: current_load[tt]) # rank the timeslots to fill valleys first
                 for t in sorted_times:
@@ -817,18 +780,18 @@ if run_opt ==1:
                     P_avail = max(market.Pmax[t_ems] - current_load[t], 0)
                     if P_avail <= 0:
                         continue
-                    P_ch = min(P_max_EV, P_avail, energy_needed / dt)
-                    P_ESs[t, i] = P_ch
-                    current_load[t] += P_ch
-                    energy_needed -= P_ch * dt
+                    P_charge = min(P_max_EV, P_avail, energy_needed / dt)
+                    P_ESs[t, i] = P_charge
+                    current_load[t] += P_charge
+                    energy_needed -= P_charge * dt
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "composite":
             # Composite score strategy with network and demand feedback
             P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy()
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
-            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
+            t_depart_dt = (tdepart_EVs * dt_ems / dt).astype(int)
             price_max = np.max(market.prices_import)
             wait_max = 24  # hours
             w_wait = 1 / 3
@@ -842,15 +805,15 @@ if run_opt ==1:
                 P_valley = max(base_mean - P_demand_base[t], 0)
                 P_avail = min(P_network_cap, P_valley)
                 connected = [i for i in range(N_EVs)
-                             if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV]
+                             if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV]
                 if not connected or P_avail < min_chunk:
                     continue
                 scores = []
                 for i in connected:
-                    wait = (t - t_a_dt[i]) * dt
+                    wait = (t - t_arriv_dt[i]) * dt
                     wait_norm = wait / wait_max if wait_max > 0 else 0
                     deficit = Emax_EV - E_state[i]
-                    remaining_time = max((t_d_dt[i] - t) * dt, dt)
+                    remaining_time = max((t_depart_dt[i] - t) * dt, dt)
                     required_power = min((deficit / dt), P_max_EV)
                     req_norm = (required_power / market.Pmax[t_ems]
                                 if market.Pmax[t_ems] > 0 else 0)
@@ -862,20 +825,20 @@ if run_opt ==1:
                 for score, required_power, i in scores:
                     if P_avail < min_chunk:
                         break
-                    P_ch = min(required_power, P_avail)
-                    if P_ch < min_chunk:
+                    P_charge = min(required_power, P_avail)
+                    if P_charge < min_chunk:
                         continue
-                    P_ESs[t, i] = P_ch
-                    E_state[i] += P_ch * dt
-                    P_avail -= P_ch
+                    P_ESs[t, i] = P_charge
+                    E_state[i] += P_charge * dt
+                    P_avail -= P_charge
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "composite_soft":
             # Composite strategy with adjustable valley softness
             P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy()
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
-            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
+            t_depart_dt = (tdepart_EVs * dt_ems / dt).astype(int)
             price_max = np.max(market.prices_import)
             wait_max = 24  # hours
             w_wait = 1 / 3
@@ -890,15 +853,15 @@ if run_opt ==1:
                 P_valley = max(P_valley, 0)
                 P_avail = min(P_network_cap, P_valley)
                 connected = [i for i in range(N_EVs)
-                             if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV]
+                             if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV]
                 if not connected or P_avail < min_chunk:
                     continue
                 scores = []
                 for i in connected:
-                    wait = (t - t_a_dt[i]) * dt
+                    wait = (t - t_arriv_dt[i]) * dt
                     wait_norm = wait / wait_max if wait_max > 0 else 0
                     deficit = Emax_EV - E_state[i]
-                    remaining_time = max((t_d_dt[i] - t) * dt, dt)
+                    remaining_time = max((t_depart_dt[i] - t) * dt, dt)
                     required_power = min((deficit / dt), P_max_EV)
                     req_norm = (required_power / market.Pmax[t_ems]
                                 if market.Pmax[t_ems] > 0 else 0)
@@ -910,20 +873,20 @@ if run_opt ==1:
                 for score, required_power, i in scores:
                     if P_avail < min_chunk:
                         break
-                    P_ch = min(required_power, P_avail)
-                    if P_ch < min_chunk:
+                    P_charge = min(required_power, P_avail)
+                    if P_charge < min_chunk:
                         continue
-                    P_ESs[t, i] = P_ch
-                    E_state[i] += P_ch * dt
-                    P_avail -= P_ch
+                    P_ESs[t, i] = P_charge
+                    E_state[i] += P_charge * dt
+                    P_avail -= P_charge
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "pareto":
             # Pareto-based ranking strategy with demand-aware allocation
             P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy()
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
-            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
+            t_depart_dt = (tdepart_EVs * dt_ems / dt).astype(int)
             price_max = np.max(market.prices_import)
             wait_max = 24  # hours
             base_mean = np.mean(P_demand_base)
@@ -934,14 +897,14 @@ if run_opt ==1:
                 P_valley = max(base_mean - P_demand_base[t], 0)
                 P_avail = min(P_network_cap, P_valley)
                 connected = [i for i in range(N_EVs)
-                             if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV]
+                             if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV]
                 if not connected or P_avail < min_chunk:
                     continue
                 objs = {}
                 for i in connected:
-                    wait_norm = ((t - t_a_dt[i]) * dt) / wait_max if wait_max > 0 else 0
+                    wait_norm = ((t - t_arriv_dt[i]) * dt) / wait_max if wait_max > 0 else 0
                     deficit = Emax_EV - E_state[i]
-                    remaining_time = max((t_d_dt[i] - t) * dt, dt)
+                    remaining_time = max((t_depart_dt[i] - t) * dt, dt)
                     required_power = min((deficit / dt), P_max_EV)
                     req_norm = (required_power / market.Pmax[t_ems]
                                 if market.Pmax[t_ems] > 0 else 0)
@@ -973,12 +936,12 @@ if run_opt ==1:
                         if P_avail < min_chunk:
                             break
                         required_power = objs[i][3]
-                        P_ch = min(required_power, P_avail)
-                        if P_ch < min_chunk:
+                        P_charge = min(required_power, P_avail)
+                        if P_charge < min_chunk:
                             continue
-                        P_ESs[t, i] = P_ch
-                        E_state[i] += P_ch * dt
-                        P_avail -= P_ch
+                        P_ESs[t, i] = P_charge
+                        E_state[i] += P_charge * dt
+                        P_avail -= P_charge
                     if P_avail < min_chunk:
                         break
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
@@ -987,8 +950,8 @@ if run_opt ==1:
             # Pareto ranking with adjustable valley softness
             P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy()
-            t_a_dt = (ta_EVs * dt_ems / dt).astype(int)
-            t_d_dt = (td_EVs * dt_ems / dt).astype(int)
+            t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
+            t_depart_dt = (tdepart_EVs * dt_ems / dt).astype(int)
             price_max = np.max(market.prices_import)
             wait_max = 24  # hours
             base_mean = np.mean(P_demand_base)
@@ -1000,14 +963,14 @@ if run_opt ==1:
                 P_valley = max(P_valley, 0)
                 P_avail = min(P_network_cap, P_valley)
                 connected = [i for i in range(N_EVs)
-                             if t_a_dt[i] <= t < t_d_dt[i] and E_state[i] < Emax_EV]
+                             if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV]
                 if not connected or P_avail < min_chunk:
                     continue
                 objs = {}
                 for i in connected:
-                    wait_norm = ((t - t_a_dt[i]) * dt) / wait_max if wait_max > 0 else 0
+                    wait_norm = ((t - t_arriv_dt[i]) * dt) / wait_max if wait_max > 0 else 0
                     deficit = Emax_EV - E_state[i]
-                    remaining_time = max((t_d_dt[i] - t) * dt, dt)
+                    remaining_time = max((t_depart_dt[i] - t) * dt, dt)
                     required_power = min((deficit / dt), P_max_EV)
                     req_norm = (required_power / market.Pmax[t_ems]
                                 if market.Pmax[t_ems] > 0 else 0)
@@ -1040,12 +1003,12 @@ if run_opt ==1:
                         if P_avail < min_chunk:
                             break
                         required_power = objs[i][3]
-                        P_ch = min(required_power, P_avail)
-                        if P_ch < min_chunk:
+                        P_charge = min(required_power, P_avail)
+                        if P_charge < min_chunk:
                             continue
-                        P_ESs[t, i] = P_ch
-                        E_state[i] += P_ch * dt
-                        P_avail -= P_ch
+                        P_ESs[t, i] = P_charge
+                        E_state[i] += P_charge * dt
+                        P_avail -= P_charge
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "lp":
@@ -1078,7 +1041,7 @@ if run_opt ==1:
             P_demand += sa.Pnet
 
         record_metrics(x, storage_assets, Pnet_market, P_demand,
-                        ta_EVs, td_EVs, dt, dt_ems, Emax_EV, market)
+                        tarriv_EVs, tdepart_EVs, dt, dt_ems, Emax_EV, market)
         
         buses_Vpu = np.zeros([T,N_buses,N_phases])
         for t in range(T):
@@ -1185,50 +1148,50 @@ if run_opt ==1:
 else:
     for x in opt_type:
         if x == "open_loop":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_open_loop.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_open_loop.p")), "rb"))
 
         if x == "mpc":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_mpc.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_mpc.p")), "rb"))
 
         if x == "uncontrolled":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_uncontrolled.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_uncontrolled.p")), "rb"))
 
         if x == "edf":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_edf.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_edf.p")), "rb"))
 
         if x == "tou":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_tou.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_tou.p")), "rb"))
 
         if x == "valley":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_valley.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_valley.p")), "rb"))
 
         if x == "lp":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_lp.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_lp.p")), "rb"))
 
         if x == "composite":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_composite.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_composite.p")), "rb"))
 
         if x == "pareto":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_pareto.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_pareto.p")), "rb"))
 
         if x == "composite_soft":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_composite_soft.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_composite_soft.p")), "rb"))
 
         if x == "pareto_soft":
-            import_data = pickle.load(open(join(path_string, normpath("EV_case_data_pareto_soft.p")), "rb"))
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_pareto_soft.p")), "rb"))
 
-        N_EVs = import_data[0]
-        P_demand_base_pred_ems = import_data[1]
-        P_compare = import_data[2]
-        P_demand_base = import_data[3]
-        Pnet_market = import_data[4]
-        storage_assets = import_data[5]
-        N_ESs = import_data[6]
-        nondispatch_assets = import_data[7]
-        time_ems = import_data[8]
-        time = import_data[9]
-        timeE = import_data[10]
-        buses_Vpu = import_data[11]
+        N_EVs = import_departata[0]
+        P_demand_base_pred_ems = import_departata[1]
+        P_compare = import_departata[2]
+        P_demand_base = import_departata[3]
+        Pnet_market = import_departata[4]
+        storage_assets = import_departata[5]
+        N_ESs = import_departata[6]
+        nondispatch_assets = import_departata[7]
+        time_ems = import_departata[8]
+        time = import_departata[9]
+        timeE = import_departata[10]
+        buses_Vpu = import_departata[11]
         
         figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                 Pnet_market, storage_assets, N_ESs,\
