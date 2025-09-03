@@ -591,6 +591,126 @@ class EnergySystem:
                 'P_export_ems':P_export_ems,\
                 'P_demand_ems':P_demand_ems}
 
+    def simulate_network_dispatch_mpc(self, dispatch_func):
+        """Run an MPC simulation using an external dispatch function.
+
+        The ``dispatch_func`` is called at every EMS interval with the current
+        EMS index and must return a numpy array of real power set-points for the
+        controllable storage assets. The set-points are applied over the EMS
+        interval and a full network power flow is solved for each simulation
+        step.
+
+        Parameters
+        ----------
+        dispatch_func : callable
+            Function with signature ``dispatch_func(t_mpc)`` returning a
+            ``(N_ES,)`` array of power set-points (kW) for EMS interval
+            ``t_mpc``.
+
+        Returns
+        -------
+        dict
+            Contains network power flow results and aggregated power values at
+            EMS resolution.
+        """
+
+        N_ESs = len(self.storage_assets)
+        N_nondispatch = len(self.nondispatch_assets)
+
+        P_import_ems = np.zeros(self.T_ems)
+        P_export_ems = np.zeros(self.T_ems)
+        P_ES_ems = np.zeros([self.T_ems, N_ESs])
+        P_demand_ems = np.zeros(self.T_ems)
+
+        N_buses = self.network.N_buses
+        N_phases = self.network.N_phases
+
+        P_demand_buses = np.zeros([self.T, N_buses, N_phases])
+        Q_demand_buses = np.zeros([self.T, N_buses, N_phases])
+
+        # add nondispatchable asset demand
+        for i in range(N_nondispatch):
+            bus_id = self.nondispatch_assets[i].bus_id
+            phases_i = self.nondispatch_assets[i].phases
+            N_phases_i = np.size(phases_i)
+            for ph_i in np.nditer(phases_i):
+                P_demand_buses[:, bus_id, ph_i] += (
+                    self.nondispatch_assets[i].Pnet / N_phases_i
+                )
+                Q_demand_buses[:, bus_id, ph_i] += (
+                    self.nondispatch_assets[i].Qnet / N_phases_i
+                )
+
+        # base demand for market bus aggregation
+        P_base = np.zeros(self.T)
+        for i in range(N_nondispatch):
+            P_base += self.nondispatch_assets[i].Pnet
+
+        PF_network_res = []
+        Pnet_market = np.zeros(self.T)
+        bus_id_market = self.market.bus_id
+        T_interval = int(self.dt_ems / self.dt)
+
+        for t_mpc in range(self.T_ems):
+            P_step = np.asarray(dispatch_func(t_mpc))
+            if P_step.size != N_ESs:
+                raise ValueError('dispatch_func must return array of length N_ES')
+            P_ES_ems[t_mpc, :] = P_step
+
+            t0 = int(t_mpc * T_interval)
+            t_range = np.arange(t0, t0 + T_interval)
+
+            # update controllable assets with constant power over the interval
+            for i in range(N_ESs):
+                for idx, t in enumerate(t_range):
+                    self.storage_assets[i].update_control_t(P_step[i], t)
+                    bus_id = self.storage_assets[i].bus_id
+                    phases_i = self.storage_assets[i].phases
+                    N_phases_i = np.size(phases_i)
+                    for ph_i in np.nditer(phases_i):
+                        P_demand_buses[t, bus_id, ph_i] += (
+                            self.storage_assets[i].Pnet[t] / N_phases_i
+                        )
+                        Q_demand_buses[t, bus_id, ph_i] += (
+                            self.storage_assets[i].Qnet[t] / N_phases_i
+                        )
+
+            # run power flow for each system step in the interval
+            for t in t_range:
+                network_t = copy.deepcopy(self.network)
+                network_t.clear_loads()
+                for bus_id in range(N_buses):
+                    for ph_i in range(N_phases):
+                        network_t.set_load(
+                            bus_id,
+                            ph_i,
+                            P_demand_buses[t, bus_id, ph_i],
+                            Q_demand_buses[t, bus_id, ph_i],
+                        )
+                network_t.zbus_pf()
+                PF_network_res.append(network_t)
+                market_bus_res = network_t.res_bus_df.iloc[bus_id_market]
+                Pnet_market[t] = np.real(
+                    market_bus_res['Sa']
+                    + market_bus_res['Sb']
+                    + market_bus_res['Sc']
+                )
+
+            P_import_ems[t_mpc] = max(np.mean(Pnet_market[t_range]), 0)
+            P_export_ems[t_mpc] = max(-np.mean(Pnet_market[t_range]), 0)
+            P_ES_total = np.zeros(len(t_range))
+            for i in range(N_ESs):
+                P_ES_total += self.storage_assets[i].Pnet[t_range]
+            P_demand_ems[t_mpc] = np.mean(P_base[t_range] + P_ES_total)
+
+        return {
+            'PF_network_res': PF_network_res,
+            'P_ES_ems': P_ES_ems,
+            'P_import_ems': P_import_ems,
+            'P_export_ems': P_export_ems,
+            'P_demand_ems': P_demand_ems,
+        }
+
     def simulate_network_manual_dispatch(self, P_ESs):
         """Simulate the network for a predefined storage dispatch schedule.
 
