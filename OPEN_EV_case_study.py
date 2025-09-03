@@ -44,7 +44,8 @@ run_opt = 1
 # opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp',
 #             'composite', 'pareto']
 opt_type = ['open_loop', 'uncontrolled', 'edf', 'tou', 'valley', 'lp',
-            'composite', 'pareto', 'composite_soft', 'pareto_soft']
+            'composite', 'pareto', 'composite_soft', 'pareto_soft',
+            'composite_mpc', 'pareto_mpc']
 
 # valley softness determines how soft the valley-filling objective is. 1 is max
 valley_softness = 0.5
@@ -1011,6 +1012,118 @@ if run_opt ==1:
                         P_avail -= P_charge
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
+        if x == "composite_mpc":
+            t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
+            t_depart_dt = (tdepart_EVs * dt_ems / dt).astype(int)
+            price_max = np.max(market.prices_import)
+            wait_max = 24
+            w_wait = w_req = w_price = 1 / 3
+            base_mean = np.mean(P_demand_base)
+            min_chunk = 0.1 * P_max_EV
+
+            def dispatch_func(t_mpc):
+                t = int(t_mpc * dt_ems / dt)
+                P_network_cap = max(market.Pmax[t_mpc] - P_demand_base[t], 0)
+                P_valley = max(base_mean - P_demand_base[t], 0)
+                P_avail = min(P_network_cap, P_valley)
+                connected = [i for i in range(N_EVs)
+                             if t_arriv_dt[i] <= t < t_depart_dt[i]
+                             and energy_system.storage_assets[i].E[t] < Emax_EV]
+                if not connected or P_avail < min_chunk:
+                    return np.zeros(N_ESs)
+                scores = []
+                for i in connected:
+                    wait = (t - t_arriv_dt[i]) * dt
+                    wait_norm = wait / wait_max if wait_max > 0 else 0
+                    deficit = Emax_EV - energy_system.storage_assets[i].E[t]
+                    required_power = min(deficit / dt, P_max_EV)
+                    req_norm = (required_power / market.Pmax[t_mpc]
+                                if market.Pmax[t_mpc] > 0 else 0)
+                    price_norm = (1 - market.prices_import[t_mpc] / price_max
+                                  if price_max > 0 else 0)
+                    score = w_wait * wait_norm + w_req * req_norm + w_price * price_norm
+                    scores.append((score, required_power, i))
+                scores.sort(reverse=True)
+                P_step = np.zeros(N_ESs)
+                P_left = P_avail
+                for score, required_power, i in scores:
+                    if P_left < min_chunk:
+                        break
+                    P_charge = min(required_power, P_left)
+                    if P_charge < min_chunk:
+                        continue
+                    P_step[i] = P_charge
+                    P_left -= P_charge
+                return P_step
+
+            output = energy_system.simulate_network_dispatch_mpc(dispatch_func)
+
+        if x == "pareto_mpc":
+            t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
+            t_depart_dt = (tdepart_EVs * dt_ems / dt).astype(int)
+            price_max = np.max(market.prices_import)
+            wait_max = 24
+            base_mean = np.mean(P_demand_base)
+            min_chunk = 0.1 * P_max_EV
+
+            def dispatch_func(t_mpc):
+                t = int(t_mpc * dt_ems / dt)
+                P_network_cap = max(market.Pmax[t_mpc] - P_demand_base[t], 0)
+                P_valley = max(base_mean - P_demand_base[t], 0)
+                P_avail = min(P_network_cap, P_valley)
+                connected = [i for i in range(N_EVs)
+                             if t_arriv_dt[i] <= t < t_depart_dt[i]
+                             and energy_system.storage_assets[i].E[t] < Emax_EV]
+                if not connected or P_avail < min_chunk:
+                    return np.zeros(N_ESs)
+                objs = {}
+                for i in connected:
+                    wait_norm = ((t - t_arriv_dt[i]) * dt) / wait_max if wait_max > 0 else 0
+                    deficit = Emax_EV - energy_system.storage_assets[i].E[t]
+                    required_power = min(deficit / dt, P_max_EV)
+                    req_norm = (required_power / market.Pmax[t_mpc]
+                                if market.Pmax[t_mpc] > 0 else 0)
+                    cost_norm = (market.prices_import[t_mpc] / price_max
+                                 if price_max > 0 else 0)
+                    objs[i] = (wait_norm, req_norm, cost_norm, required_power)
+                remaining = set(connected)
+                fronts = []
+                while remaining:
+                    front = []
+                    for i in list(remaining):
+                        dominated = False
+                        for j in remaining:
+                            if i == j:
+                                continue
+                            oi = objs[i]
+                            oj = objs[j]
+                            if (oj[0] <= oi[0] and oj[1] <= oi[1] and oj[2] <= oi[2]
+                                    and (oj[0] < oi[0] or oj[1] < oi[1] or oj[2] < oi[2])):
+                                dominated = True
+                                break
+                        if not dominated:
+                            front.append(i)
+                    fronts.append(front)
+                    remaining -= set(front)
+                P_step = np.zeros(N_ESs)
+                P_left = P_avail
+                for front in fronts:
+                    front.sort(key=lambda i: objs[i][1], reverse=True)
+                    for i in front:
+                        if P_left < min_chunk:
+                            break
+                        required_power = objs[i][3]
+                        P_charge = min(required_power, P_left)
+                        if P_charge < min_chunk:
+                            continue
+                        P_step[i] = P_charge
+                        P_left -= P_charge
+                    if P_left < min_chunk:
+                        break
+                return P_step
+
+            output = energy_system.simulate_network_dispatch_mpc(dispatch_func)
+
         if x == "lp":
             for nd in nondispatch_assets: # for every non-dispatachable asset in the network, set predicited power to actual power for whole day
                 nd.Pnet_pred = nd.Pnet.copy()
@@ -1137,6 +1250,18 @@ if run_opt ==1:
                             Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
                             time_ems, time, timeE, buses_Vpu)
             pickle.dump(pickled_data_PAR_SOFT, open(join(path_string, normpath("EV_case_data_pareto_soft.p")), "wb"))
+
+        if x == "composite_mpc":
+            pickled_data_COMP_MPC = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
+                            Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
+                            time_ems, time, timeE, buses_Vpu)
+            pickle.dump(pickled_data_COMP_MPC, open(join(path_string, normpath("EV_case_data_composite_mpc.p")), "wb"))
+
+        if x == "pareto_mpc":
+            pickled_data_PAR_MPC = (N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
+                            Pnet_market, storage_assets, N_ESs, nondispatch_assets,\
+                            time_ems, time, timeE, buses_Vpu)
+            pickle.dump(pickled_data_PAR_MPC, open(join(path_string, normpath("EV_case_data_pareto_mpc.p")), "wb"))
         
         
         figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
@@ -1179,6 +1304,12 @@ else:
 
         if x == "pareto_soft":
             import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_pareto_soft.p")), "rb"))
+
+        if x == "composite_mpc":
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_composite_mpc.p")), "rb"))
+
+        if x == "pareto_mpc":
+            import_departata = pickle.load(open(join(path_string, normpath("EV_case_data_pareto_mpc.p")), "rb"))
 
         N_EVs = import_departata[0]
         P_demand_base_pred_ems = import_departata[1]
