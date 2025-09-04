@@ -46,9 +46,6 @@ run_opt = 1
 # include soft variants with flexible valley filling
 opt_type = ['composite', 'pareto', 'composite_soft', 'pareto_soft']
 
-# softness factor for valley cap (1=hard cap, 0=no valley constraint)
-valley_softness = 0.75
-
 path_string = normpath('Results/EV_Case_Study/')
 if not os.path.isdir(path_string):
     os.makedirs(path_string)
@@ -920,12 +917,14 @@ if run_opt ==1:
             w_price = 1 / 3
             base_mean = np.mean(P_demand_base)
             min_chunk = 0.1 * P_max_EV
+            alpha = 1.5      # >1 penalises peaks more strongly; try 1.2–2.5
+            eps   = 1e-6     # avoids divide-by-zero
+            floor_frac = 0.05  # minimum fraction of headroom you'll always allow (set 0.0 if you want no floor)
             for t in range(T):
                 t_ems = int(t / (dt_ems / dt))
-                P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
-                P_valley = (base_mean - P_demand_base[t]) * valley_softness
-                P_valley = max(P_valley, 0)
-                P_avail = min(P_network_cap, P_valley)
+                P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0.0)
+                valley_factor = min((base_mean / max(P_demand_base[t], eps))**alpha, 1.0)
+                P_avail = P_network_cap * max(valley_factor, floor_frac)
                 connected = [i for i in range(N_EVs)
                              if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV]
                 if not connected or P_avail < min_chunk:
@@ -965,12 +964,14 @@ if run_opt ==1:
             wait_max = 24  # hours
             base_mean = np.mean(P_demand_base)
             min_chunk = 0.1 * P_max_EV
+            alpha = 1.5      # >1 penalises peaks more strongly; try 1.2–2.5
+            eps   = 1e-6     # avoids divide-by-zero
+            floor_frac = 0.05  # minimum fraction of headroom you'll always allow (set 0.0 if you want no floor)
             for t in range(T):
                 t_ems = int(t / (dt_ems / dt))
-                P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
-                P_valley = (base_mean - P_demand_base[t]) * valley_softness
-                P_valley = max(P_valley, 0)
-                P_avail = min(P_network_cap, P_valley)
+                P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0.0)
+                valley_factor = min((base_mean / max(P_demand_base[t], eps))**alpha, 1.0)
+                P_avail = P_network_cap * max(valley_factor, floor_frac)
                 connected = [i for i in range(N_EVs)
                              if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV]
                 if not connected or P_avail < min_chunk:
