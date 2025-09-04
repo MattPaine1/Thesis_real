@@ -46,7 +46,8 @@ run_opt = 1
 # include soft variants with flexible valley filling
 opt_type = ['composite', 'pareto', 'composite_soft', 'pareto_soft']
 
-# valley softness determines how soft the valley-filling objective is. 1 is max
+# valley_softness tunes valley-filling aggressiveness (0<valley_softness<=1).
+# Lower values enforce more extreme weighting of low-demand periods.
 valley_softness = 0.75
 
 path_string = normpath('Results/EV_Case_Study/')
@@ -922,11 +923,10 @@ if run_opt ==1:
             for t in range(T):
                 t_ems = int(t / (dt_ems / dt))
                 P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
-                valley_weight = (
-                    min(base_mean / P_demand_base[t], 1)
-                    if P_demand_base[t] > 0
-                    else 1
+                valley_ratio = (
+                    base_mean / P_demand_base[t] if P_demand_base[t] > 0 else 1
                 )
+                valley_weight = min(valley_ratio, 1) ** (1 / valley_softness)
                 P_avail = P_network_cap * valley_weight
                 connected = [
                     i for i in range(N_EVs)
@@ -977,11 +977,10 @@ if run_opt ==1:
             for t in range(T):
                 t_ems = int(t / (dt_ems / dt))
                 P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
-                valley_weight = (
-                    min(base_mean / P_demand_base[t], 1)
-                    if P_demand_base[t] > 0
-                    else 1
+                valley_ratio = (
+                    base_mean / P_demand_base[t] if P_demand_base[t] > 0 else 1
                 )
+                valley_weight = min(valley_ratio, 1) ** (1 / valley_softness)
                 P_avail = P_network_cap * valley_weight
                 connected = [
                     i for i in range(N_EVs)
