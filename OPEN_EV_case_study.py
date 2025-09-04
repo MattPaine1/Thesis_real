@@ -923,8 +923,16 @@ if run_opt ==1:
                                 continue
                             oi = objs[i]
                             oj = objs[j]
-                            if (oj[0] <= oi[0] and oj[1] <= oi[1] and oj[2] <= oi[2]
-                                    and (oj[0] < oi[0] or oj[1] < oi[1] or oj[2] < oi[2])):
+                            if (
+                                oj[0] >= oi[0]
+                                and oj[1] >= oi[1]
+                                and oj[2] <= oi[2]
+                                and (
+                                    oj[0] > oi[0]
+                                    or oj[1] > oi[1]
+                                    or oj[2] < oi[2]
+                                )
+                            ):
                                 dominated = True
                                 break
                         if not dominated:
@@ -1097,8 +1105,16 @@ if run_opt ==1:
                                 continue
                             oi = objs[i]
                             oj = objs[j]
-                            if (oj[0] <= oi[0] and oj[1] <= oi[1] and oj[2] <= oi[2]
-                                    and (oj[0] < oi[0] or oj[1] < oi[1] or oj[2] < oi[2])):
+                            if (
+                                oj[0] >= oi[0]
+                                and oj[1] >= oi[1]
+                                and oj[2] <= oi[2]
+                                and (
+                                    oj[0] > oi[0]
+                                    or oj[1] > oi[1]
+                                    or oj[2] < oi[2]
+                                )
+                            ):
                                 dominated = True
                                 break
                         if not dominated:
