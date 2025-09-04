@@ -46,6 +46,9 @@ run_opt = 1
 # include soft variants with flexible valley filling
 opt_type = ['composite', 'pareto', 'composite_soft', 'pareto_soft']
 
+# softness factor for valley cap (1=hard cap, 0=no valley constraint)
+valley_softness = 1.0
+
 path_string = normpath('Results/EV_Case_Study/')
 if not os.path.isdir(path_string):
     os.makedirs(path_string)
@@ -844,6 +847,127 @@ if run_opt ==1:
                 t_ems = int(t / (dt_ems / dt))
                 P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
                 P_valley = max(base_mean - P_demand_base[t], 0)
+                P_avail = min(P_network_cap, P_valley)
+                connected = [i for i in range(N_EVs)
+                             if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV]
+                if not connected or P_avail < min_chunk:
+                    continue
+                objs = {}
+                for i in connected:
+                    wait_norm = ((t - t_arriv_dt[i]) * dt) / wait_max if wait_max > 0 else 0
+                    deficit = Emax_EV - E_state[i]
+                    remaining_time = max((t_depart_dt[i] - t) * dt, dt)
+                    required_power = min((deficit / dt), P_max_EV)
+                    req_norm = (required_power / market.Pmax[t_ems]
+                                if market.Pmax[t_ems] > 0 else 0)
+                    cost_norm = (market.prices_import[t_ems] / price_max
+                                 if price_max > 0 else 0)
+                    objs[i] = (wait_norm, req_norm, cost_norm, required_power)
+                remaining = set(connected)
+                fronts = []
+                while remaining:
+                    front = []
+                    for i in list(remaining):
+                        dominated = False
+                        for j in remaining:
+                            if i == j:
+                                continue
+                            oi = objs[i]
+                            oj = objs[j]
+                            if (
+                                oj[0] >= oi[0]
+                                and oj[1] >= oi[1]
+                                and oj[2] <= oi[2]
+                                and (
+                                    oj[0] > oi[0]
+                                    or oj[1] > oi[1]
+                                    or oj[2] < oi[2]
+                                )
+                            ):
+                                dominated = True
+                                break
+                        if not dominated:
+                            front.append(i)
+                    fronts.append(front)
+                    remaining -= set(front)
+                for front in fronts:
+                    front.sort(key=lambda i: objs[i][1], reverse=True)
+                    for i in front:
+                        if P_avail < min_chunk:
+                            break
+                        required_power = objs[i][3]
+                        P_charge = min(required_power, P_avail)
+                        if P_charge < min_chunk:
+                            continue
+                        P_ESs[t, i] = P_charge
+                        E_state[i] += P_charge * dt
+                        P_avail -= P_charge
+                    if P_avail < min_chunk:
+                        break
+            output = energy_system.simulate_network_manual_dispatch(P_ESs)
+
+
+        if x == "composite_soft":
+            # Composite score strategy with adjustable valley constraint
+            P_ESs = np.zeros((T, N_ESs))
+            E_state = E0_EVs.copy()
+            t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
+            t_depart_dt = (tdepart_EVs * dt_ems / dt).astype(int)
+            price_max = np.max(market.prices_import)
+            wait_max = 24  # hours
+            w_wait = w_req = w_price = 1 / 3
+            base_mean = np.mean(P_demand_base)
+            min_chunk = 0.1 * P_max_EV
+            for t in range(T):
+                t_ems = int(t / (dt_ems / dt))
+                P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+                P_valley_hard = max(base_mean - P_demand_base[t], 0)
+                P_valley = valley_softness * P_valley_hard + (1 - valley_softness) * P_network_cap
+                P_avail = min(P_network_cap, P_valley)
+                connected = [i for i in range(N_EVs)
+                             if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV]
+                if not connected or P_avail < min_chunk:
+                    continue
+                scores = []
+                for i in connected:
+                    wait = (t - t_arriv_dt[i]) * dt
+                    wait_norm = wait / wait_max if wait_max > 0 else 0
+                    deficit = Emax_EV - E_state[i]
+                    remaining_time = max((t_depart_dt[i] - t) * dt, dt)
+                    required_power = min((deficit / dt), P_max_EV)
+                    req_norm = (required_power / market.Pmax[t_ems]
+                                if market.Pmax[t_ems] > 0 else 0)
+                    price_norm = (1 - market.prices_import[t_ems] / price_max
+                                  if price_max > 0 else 0)
+                    score = w_wait * wait_norm + w_req * req_norm + w_price * price_norm
+                    scores.append((score, required_power, i))
+                scores.sort(reverse=True)
+                for score, required_power, i in scores:
+                    if P_avail < min_chunk:
+                        break
+                    P_charge = min(required_power, P_avail)
+                    if P_charge < min_chunk:
+                        continue
+                    P_ESs[t, i] = P_charge
+                    E_state[i] += P_charge * dt
+                    P_avail -= P_charge
+            output = energy_system.simulate_network_manual_dispatch(P_ESs)
+
+        if x == "pareto_soft":
+            # Pareto-based ranking strategy with adjustable valley constraint
+            P_ESs = np.zeros((T, N_ESs))
+            E_state = E0_EVs.copy()
+            t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
+            t_depart_dt = (tdepart_EVs * dt_ems / dt).astype(int)
+            price_max = np.max(market.prices_import)
+            wait_max = 24  # hours
+            base_mean = np.mean(P_demand_base)
+            min_chunk = 0.1 * P_max_EV
+            for t in range(T):
+                t_ems = int(t / (dt_ems / dt))
+                P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+                P_valley_hard = max(base_mean - P_demand_base[t], 0)
+                P_valley = valley_softness * P_valley_hard + (1 - valley_softness) * P_network_cap
                 P_avail = min(P_network_cap, P_valley)
                 connected = [i for i in range(N_EVs)
                              if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV]
