@@ -41,6 +41,29 @@ __version__ = "1.1.0"
 path_string = normpath('Results/Building_Case_Study/')
 if not os.path.isdir(path_string):
     os.makedirs(path_string)
+save_suffix = '.pdf'
+
+
+def plot_ev_arrivals_departures(arrivals, departures, dt_scale, path):
+    """Plot EV arrival and departure times on a single figure."""
+
+    times_arr = arrivals * dt_scale
+    times_dep = departures * dt_scale
+    ev_idx = np.arange(len(arrivals))
+
+    plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
+    plt.scatter(times_arr, ev_idx, marker='o', label='Arrival')
+    plt.scatter(times_dep, ev_idx, marker='x', label='Departure')
+    plt.ylabel('EV index')
+    plt.xlabel('Time (hh:mm)')
+    plt.xlim(0, 24)
+    plt.xticks([0, 8, 16, 24], ('00:00', '08:00', '16:00', '00:00'))
+    plt.grid(True, alpha=0.5)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(join(path, normpath('EV_arrivals_departures' + save_suffix)),
+                bbox_inches='tight')
+    plt.close()
         
 #######################################
 ### STEP 0: Load Data
@@ -97,6 +120,8 @@ td_EVs = np.random.randint(29*2,32*2+1,N_EVs) - T0*2 #random EV departure times 
 for i in range(N_EVs):
     td_EVs[i] = np.max([td_EVs[i],ta_EVs[i]])
     E0_EVs[i] = np.max([E0_EVs[i],Emax_EV-P_max_EV*(td_EVs[i]-ta_EVs[i])])
+
+plot_ev_arrivals_departures(ta_EVs, td_EVs, dt_ems*2, path_string)
 #Building parameters
 Tmax = 18 # degree celsius
 Tmin = 16 # degree celsius
@@ -300,8 +325,6 @@ if not winterFlag:
     season_str = '_summer'
 else:
     season_str = '_winter'
-
-save_suffix = '.pdf'
 
 plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k') #6,3.75
 plt.plot(time,P_demand_base,'--',label='Base Demand')

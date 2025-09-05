@@ -338,6 +338,40 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
                     bbox_inches='tight')
         plt.close()
 
+
+def plot_ev_arrivals_departures(arrivals, departures, dt_scale, path):
+    """Plot EV arrival and departure times on a single figure.
+
+    Parameters
+    ----------
+    arrivals : array-like
+        Arrival times expressed in units of ``dt_scale``.
+    departures : array-like
+        Departure times expressed in units of ``dt_scale``.
+    dt_scale : float
+        Duration of one time step in hours.
+    path : str
+        Directory where the figure will be saved.
+    """
+
+    times_arr = arrivals * dt_scale
+    times_dep = departures * dt_scale
+    ev_idx = np.arange(len(arrivals))
+
+    plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
+    plt.scatter(times_arr, ev_idx, marker='o', label='Arrival')
+    plt.scatter(times_dep, ev_idx, marker='x', label='Departure')
+    plt.ylabel('EV index')
+    plt.xlabel('Time (hh:mm)')
+    plt.xlim(0, 24)
+    plt.xticks([0, 8, 16, 24], ('00:00', '08:00', '16:00', '00:00'))
+    plt.grid(True, alpha=0.5)
+    plt.legend()
+    plt.tight_layout()
+    plt.savefig(join(path, normpath('EV_arrivals_departures' + save_suffix)),
+                bbox_inches='tight')
+    plt.close()
+
 if run_opt ==1:
            
     #######################################
@@ -392,6 +426,9 @@ if run_opt ==1:
     # random EV departure times between 5pm and 9pm
     tdepart_EVs = np.random.randint(int(15/dt_ems),\
                                int(21/dt_ems),N_EVs) - int(T0/dt_ems)
+
+    # plot EV arrival and departure times
+    plot_ev_arrivals_departures(tarriv_EVs, tdepart_EVs, dt_ems, path_string)
     
     # Market parameters
     # market and EMS have the same time-series
