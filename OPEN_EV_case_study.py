@@ -918,6 +918,7 @@ if run_opt ==1:
 
         if x == "composite_backlog":
             # Composite strategy with backlog-aware allocation
+            # Above mean demand, charge only a proportion of connected EVs
             P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy()
             t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
@@ -937,22 +938,12 @@ if run_opt ==1:
                     for i in range(N_EVs)
                     if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV
                 ]
-                tolerance = (
-                    demand_tolerance * base_mean
-                    if demand_tolerance < 1
-                    else demand_tolerance
-                )
                 if P_demand_base[t] <= base_mean:
                     P_valley = base_mean - P_demand_base[t]
-                elif (
-                    P_demand_base[t] < base_mean + tolerance and connected
-                ):
-                    over_ratio = (base_mean + tolerance - P_demand_base[t]) / tolerance
-                    backlog_ratio = len(connected) / N_EVs if N_EVs > 0 else 0
-                    P_valley = (
-                        over_ratio * backlog_ratio * P_max_EV * len(connected)
-                    )
-                    P_valley = min(P_valley, P_max_EV * len(connected))
+                elif connected:
+                    diff = P_demand_base[t] - base_mean
+                    proportion = max(0, 0.5 * (1 - diff / 1650))
+                    P_valley = proportion * P_max_EV * len(connected)
                 else:
                     P_valley = 0
                 P_avail = min(P_network_cap, P_valley)
@@ -1158,7 +1149,7 @@ if run_opt ==1:
             output = energy_system.simulate_network_manual_dispatch(P_ESs)
 
         if x == "pareto_backlog":
-            # Pareto strategy using backlog ratio when above mean demand
+            # Pareto strategy with proportional reduction above mean demand
             P_ESs = np.zeros((T, N_ESs))
             E_state = E0_EVs.copy()
             t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
@@ -1175,22 +1166,12 @@ if run_opt ==1:
                     for i in range(N_EVs)
                     if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV
                 ]
-                tolerance = (
-                    demand_tolerance * base_mean
-                    if demand_tolerance < 1
-                    else demand_tolerance
-                )
                 if P_demand_base[t] <= base_mean:
                     P_valley = base_mean - P_demand_base[t]
-                elif (
-                    P_demand_base[t] < base_mean + tolerance and connected
-                ):
-                    over_ratio = (base_mean + tolerance - P_demand_base[t]) / tolerance
-                    backlog_ratio = len(connected) / N_EVs if N_EVs > 0 else 0
-                    P_valley = (
-                        over_ratio * backlog_ratio * P_max_EV * len(connected)
-                    )
-                    P_valley = min(P_valley, P_max_EV * len(connected))
+                elif connected:
+                    diff = P_demand_base[t] - base_mean
+                    proportion = max(0, 0.5 * (1 - diff / 1650))
+                    P_valley = proportion * P_max_EV * len(connected)
                 else:
                     P_valley = 0
                 P_avail = min(P_network_cap, P_valley)
