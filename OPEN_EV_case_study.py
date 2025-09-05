@@ -187,7 +187,7 @@ def figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
 
 def record_metrics(strategy, storage_assets, P_import, P_demand,
                    tarriv_EVs, tdepart_EVs, dt, dt_ems, Emax_EV, market,
-                   charge_tolerance=0.1):
+                   charge_tolerance=1):
 
     # function to record mentrics for every strategy          
     N_EVs = len(storage_assets) # number of EVs
