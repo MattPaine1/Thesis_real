@@ -374,6 +374,32 @@ def plot_ev_arrivals_departures(arrivals, departures, dt_scale, path):
                 bbox_inches='tight')
     plt.close()
 
+
+def plot_energy_deficit_arrival(E0_EVs, Emax_EV, path):
+    """Plot the energy deficit at arrival for each EV.
+
+    Parameters
+    ----------
+    E0_EVs : array-like
+        Initial energy levels of the EVs upon arrival (kWh).
+    Emax_EV : float
+        Maximum energy capacity of the EV batteries (kWh).
+    path : str
+        Directory where the figure will be saved.
+    """
+
+    deficits = Emax_EV - np.asarray(E0_EVs)
+    ev_idx = np.arange(len(deficits))
+
+    plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
+    plt.bar(ev_idx, deficits)
+    plt.xlabel('EV index')
+    plt.ylabel('Energy Deficit at Arrival (kWh)')
+    plt.tight_layout()
+    plt.savefig(join(path, normpath('energy_deficit_arrival_per_ev' + save_suffix)),
+                bbox_inches='tight')
+    plt.close()
+
 if run_opt ==1:
            
     #######################################
@@ -431,6 +457,8 @@ if run_opt ==1:
 
     # plot EV arrival and departure times
     plot_ev_arrivals_departures(tarriv_EVs, tdepart_EVs, dt_ems, path_string)
+    # plot energy deficit at arrival for each EV
+    plot_energy_deficit_arrival(E0_EVs, Emax_EV, path_string)
     
     # Market parameters
     # market and EMS have the same time-series
