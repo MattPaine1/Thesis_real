@@ -400,6 +400,33 @@ def plot_energy_deficit_arrival(E0_EVs, Emax_EV, path):
                 bbox_inches='tight')
     plt.close()
 
+
+def plot_end_of_day_charge(storage_assets, path, strategy):
+    """Plot the final state-of-charge for each EV after the simulation.
+
+    Parameters
+    ----------
+    storage_assets : list
+        List of EV storage asset objects containing energy profiles.
+    path : str
+        Directory where the figure will be saved.
+    strategy : str
+        Name of the charging strategy (used in the filename and title).
+    """
+
+    final_energy = [sa.E[-1] for sa in storage_assets]
+    ev_idx = np.arange(len(final_energy))
+
+    plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
+    plt.bar(ev_idx, final_energy)
+    plt.xlabel('EV index')
+    plt.ylabel('End-of-day Energy (kWh)')
+    plt.tight_layout()
+    filename = f'end_of_day_charge_{strategy}'
+    plt.savefig(join(path, normpath(filename + save_suffix)),
+                bbox_inches='tight')
+    plt.close()
+
 if run_opt ==1:
            
     #######################################
@@ -1705,6 +1732,7 @@ if run_opt ==1:
         figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                     Pnet_market, storage_assets, N_ESs,\
                     nondispatch_assets, time_ems, time, timeE, buses_Vpu)
+        plot_end_of_day_charge(storage_assets, metrics_path, x)
     plot_performance_metrics(metrics, metrics_path)
 
 # Load pickled data and plot
@@ -1777,6 +1805,7 @@ else:
         figure_plot(x, N_EVs, P_demand_base_pred_ems, P_compare, P_demand_base,\
                 Pnet_market, storage_assets, N_ESs,\
                 nondispatch_assets, time_ems, time, timeE, buses_Vpu)
+        plot_end_of_day_charge(storage_assets, metrics_path, x)
 
 
 
