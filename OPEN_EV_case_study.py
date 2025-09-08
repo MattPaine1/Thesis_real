@@ -18,6 +18,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
+plt.style.use("seaborn-v0_8-whitegrid")
 
 from System.Network_3ph_pf import Network_3ph
 import System.Assets as AS
@@ -314,13 +315,23 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
     bar_plot(metrics['total_energy_cost'], 'Total Cost (AUD)',
              'total_cost')
 
-    plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
-    plt.boxplot([metrics['waiting_times'][s] for s in strats], labels=strats)
-    plt.ylabel('Waiting Time per EV (h)')
-    plt.tight_layout()
-    plt.savefig(join(path, normpath('waiting_time_per_ev' + save_suffix)),
-                bbox_inches='tight')
-    plt.close()
+    # plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
+    # plt.boxplot([metrics['waiting_times'][s] for s in strats], labels=strats)
+    # plt.ylabel('Waiting Time per EV (h)')
+    # plt.tight_layout()
+    # plt.savefig(join(path, normpath('waiting_time_per_ev' + save_suffix)),
+    #             bbox_inches='tight')
+    # plt.close()
+
+    with plt.style.context("seaborn-v0_8-white"):
+        plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
+        plt.boxplot([metrics['waiting_times'][s] for s in strats], labels=strats)
+        plt.ylabel('Waiting Time per EV (h)')
+        plt.tight_layout()
+        plt.savefig(join(path, normpath('waiting_time_per_ev' + save_suffix)),
+                    bbox_inches='tight')
+        plt.close()
+
     data = []
     labels = []
     for s in strats:
@@ -331,15 +342,24 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
 
             labels.append(s)
     if data:
-        plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
-                   edgecolor='k')
-        plt.boxplot(data, labels=labels)
-        plt.ylabel('Energy Deficit at Departure (kWh)')
-        plt.tight_layout()
-        plt.savefig(join(path, normpath('energy_deficit_per_ev' + save_suffix)),
-                    bbox_inches='tight')
-        plt.close()
+        # plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
+        #            edgecolor='k')
+        # plt.boxplot(data, labels=labels)
+        # plt.ylabel('Energy Deficit at Departure (kWh)')
+        # plt.tight_layout()
+        # plt.savefig(join(path, normpath('energy_deficit_per_ev' + save_suffix)),
+        #             bbox_inches='tight')
+        # plt.close()
 
+        with plt.style.context("seaborn-v0_8-white"):
+            plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
+                       edgecolor='k')
+            plt.boxplot(data, labels=labels)
+            plt.ylabel('Energy Deficit at Departure (kWh)')
+            plt.tight_layout()
+            plt.savefig(join(path, normpath('energy_deficit_per_ev' + save_suffix)),
+                        bbox_inches='tight')
+            plt.close()
 
 def plot_ev_arrivals_departures(arrivals, departures, dt_scale, path):
     """Plot EV arrival and departure times on a single figure.
@@ -462,7 +482,8 @@ if run_opt ==1:
     #N_EVs = 2  # number of EVs
     Emax_EV = 36  # maximum EV energy level
     Emin_EV = 0  # minimum EV energy level
-    P_max_EV = 6.6  # maximum EV charging power
+    # P_max_EV = 6.6  # maximum EV charging power
+    P_max_EV = 3.3  # maximum EV charging power
     P_min_EV = 0  # minimum EV charging power
     
     # EV charge/discharge efficiency
