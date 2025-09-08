@@ -274,7 +274,6 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
         plt.bar(strats, vals)
         plt.ylabel(ylabel)
         plt.xlabel('Strategy')
-        plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
         plt.savefig(join(path, normpath(filename + save_suffix)), bbox_inches='tight')
         plt.close()
@@ -294,7 +293,6 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
             label='Additional Imported Power', color='orange')
     plt.ylabel('Power (kW)')
     plt.xlabel('Strategy')
-    plt.xticks(rotation=45, ha='right')
     plt.legend()
     plt.tight_layout()
     plt.savefig(join(path, normpath('import_power_combined' + save_suffix)),
@@ -329,7 +327,6 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
         plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
         plt.boxplot([metrics['waiting_times'][s] for s in strats], labels=strats)
         plt.ylabel('Waiting Time per EV (h)')
-        plt.xticks(rotation=45, ha='right')
         plt.tight_layout()
         plt.savefig(join(path, normpath('waiting_time_per_ev' + save_suffix)),
                     bbox_inches='tight')
@@ -359,7 +356,6 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
                        edgecolor='k')
             plt.boxplot(data, labels=labels)
             plt.ylabel('Energy Deficit at Departure (kWh)')
-            plt.xticks(rotation=45, ha='right')
             plt.tight_layout()
             plt.savefig(join(path, normpath('energy_deficit_per_ev' + save_suffix)),
                         bbox_inches='tight')
