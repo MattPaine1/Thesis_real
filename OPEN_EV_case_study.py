@@ -482,8 +482,8 @@ if run_opt ==1:
     #N_EVs = 2  # number of EVs
     Emax_EV = 36  # maximum EV energy level
     Emin_EV = 0  # minimum EV energy level
-    # P_max_EV = 6.6  # maximum EV charging power
-    P_max_EV = 3.3  # maximum EV charging power
+    P_max_EV = 6.6  # maximum EV charging power
+    # P_max_EV = 3.3  # maximum EV charging power
     P_min_EV = 0  # minimum EV charging power
     
     # EV charge/discharge efficiency
