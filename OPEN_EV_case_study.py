@@ -17,7 +17,9 @@ from os.path import normpath, join
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
+from mpl_toolkits.mplot3d import Axes3D  # noqa: F401, for 3D plots
 import pickle
+from sklearn.linear_model import Ridge
 plt.style.use("seaborn-v0_8-whitegrid")
 
 from System.Network_3ph_pf import Network_3ph
@@ -446,6 +448,242 @@ def plot_end_of_day_charge(storage_assets, path, strategy):
     plt.savefig(join(path, normpath(filename + save_suffix)),
                 bbox_inches='tight')
     plt.close()
+
+
+def composite_backlog_with_weights(
+    energy_system,
+    market,
+    P_demand_base,
+    E0_EVs,
+    tarriv_EVs,
+    tdepart_EVs,
+    dt,
+    dt_ems,
+    Emax_EV,
+    P_max_EV,
+    weights,
+):
+    """Simulate the composite backlog strategy with custom weights.
+
+    Parameters
+    ----------
+    energy_system : EnergySystem
+        Configured energy system object.
+    market : Market
+        Market object providing price and network limits.
+    P_demand_base : ndarray
+        Base demand profile at system resolution.
+    E0_EVs : ndarray
+        Initial energy of each EV.
+    tarriv_EVs, tdepart_EVs : ndarray
+        Arrival and departure times in EMS resolution.
+    dt, dt_ems : float
+        Simulation and EMS time steps in hours.
+    Emax_EV : float
+        Maximum energy capacity of each EV.
+    P_max_EV : float
+        Maximum charging power per EV.
+    weights : tuple
+        Tuple of (w_wait, w_req, w_price).
+
+    Returns
+    -------
+    dict
+        Dictionary with key performance metrics for the run.
+    """
+
+    w_wait, w_req, w_price = weights
+    T = energy_system.T
+    N_ESs = len(energy_system.storage_assets)
+
+    # Reset storage assets to initial state
+    for i, sa in enumerate(energy_system.storage_assets):
+        sa.Pnet = np.zeros_like(sa.Pnet)
+        sa.E = E0_EVs[i] * np.ones_like(sa.E)
+
+    P_ESs = np.zeros((T, N_ESs))
+    E_state = E0_EVs.copy()
+    t_arriv_dt = (tarriv_EVs * dt_ems / dt).astype(int)
+    t_depart_dt = (tdepart_EVs * dt_ems / dt).astype(int)
+    price_max = np.max(market.prices_import)
+    wait_max = 24  # hours
+    base_mean = np.mean(P_demand_base)
+    min_chunk = 0.1 * P_max_EV
+
+    for t in range(T):
+        t_ems = int(t / (dt_ems / dt))
+        P_network_cap = max(market.Pmax[t_ems] - P_demand_base[t], 0)
+        connected = [
+            i
+            for i in range(N_ESs)
+            if t_arriv_dt[i] <= t < t_depart_dt[i] and E_state[i] < Emax_EV
+        ]
+
+        if P_demand_base[t] <= base_mean:
+            P_valley = base_mean - P_demand_base[t]
+        elif connected:
+            diff = P_demand_base[t] - base_mean
+            proportion = max(0, 0.5 * (1 - diff / 1650))
+            P_valley = proportion * P_max_EV * len(connected)
+        else:
+            P_valley = 0
+
+        P_avail = min(P_network_cap, P_valley)
+        if not connected or P_avail < min_chunk:
+            continue
+
+        scores = []
+        for i in connected:
+            wait = (t - t_arriv_dt[i]) * dt
+            wait_norm = wait / wait_max if wait_max > 0 else 0
+            deficit = Emax_EV - E_state[i]
+            required_power = min((deficit / dt), P_max_EV)
+            req_norm = (
+                required_power / market.Pmax[t_ems] if market.Pmax[t_ems] > 0 else 0
+            )
+            price_norm = (
+                1 - market.prices_import[t_ems] / price_max if price_max > 0 else 0
+            )
+            score = w_wait * wait_norm + w_req * req_norm + w_price * price_norm
+            scores.append((score, required_power, i))
+
+        scores.sort(reverse=True)
+        for score, required_power, i in scores:
+            if P_avail < min_chunk:
+                break
+            P_charge = min(required_power, P_avail)
+            if P_charge < min_chunk:
+                continue
+            P_ESs[t, i] = P_charge
+            E_state[i] += P_charge * dt
+            P_avail -= P_charge
+
+    output = energy_system.simulate_network_manual_dispatch(P_ESs)
+
+    # Recover market import power
+    Pnet_market = np.zeros(T)
+    PF_network_res = output["PF_network_res"]
+    bus_id_market = market.bus_id
+    for t in range(T):
+        market_bus_res = PF_network_res[t].res_bus_df.iloc[bus_id_market]
+        Pnet_market[t] = np.real(
+            market_bus_res["Sa"] + market_bus_res["Sb"] + market_bus_res["Sc"]
+        )
+
+    # Total demand including EV charging
+    P_demand = P_demand_base.copy()
+    for sa in energy_system.storage_assets:
+        P_demand += sa.Pnet
+
+    # Compute metrics of interest
+    N_EVs = N_ESs
+    t_arriv = (tarriv_EVs * dt_ems / dt).astype(int)
+    t_depart = (tdepart_EVs * dt_ems / dt).astype(int)
+    waiting_times = []
+    energy_deficits = []
+    for i in range(N_EVs):
+        power_i = energy_system.storage_assets[i].Pnet
+        arrival = t_arriv[i]
+        departure = min(t_depart[i], len(power_i))
+        charging_array = np.where(power_i[arrival:departure] > 0)[0]
+        if charging_array.size == 0:
+            waiting_times.append((departure - arrival) * dt)
+        else:
+            waiting_times.append(charging_array[0] * dt)
+        energy_i = energy_system.storage_assets[i].E
+        departure_energy = energy_i[min(departure, len(energy_i) - 1)]
+        energy_deficits.append(max(Emax_EV - departure_energy, 0))
+
+    metrics = {
+        "aggregate_energy_deficit": np.nansum(energy_deficits),
+        "aggregate_waiting_time": np.nansum(waiting_times),
+        "energy_variability": np.max(Pnet_market) - np.min(P_demand),
+        "total_energy_cost": -market.calculate_revenue(Pnet_market, dt),
+    }
+
+    return metrics
+
+
+def ridge_regression_composite_backlog(
+    energy_system,
+    market,
+    P_demand_base,
+    E0_EVs,
+    tarriv_EVs,
+    tdepart_EVs,
+    dt,
+    dt_ems,
+    Emax_EV,
+    P_max_EV,
+    path,
+    alpha=1.0,
+):
+    """Explore composite backlog weights using ridge regression.
+
+    Weightings are evaluated in 0.1 increments and constrained to sum to one,
+    yielding 66 unique combinations. For each performance metric a 3D scatter
+    plot of the weight combinations is produced with colour indicating the
+    resulting metric value.
+    """
+
+    # Generate all valid weight combinations at 0.1 resolution
+    weight_grid = []
+    for w_wait in range(11):
+        for w_req in range(11 - w_wait):
+            w_price = 10 - w_wait - w_req
+            weight_grid.append((w_wait / 10, w_req / 10, w_price / 10))
+
+    assert (
+        len(weight_grid) == 66
+    ), "Expected 66 weight combinations with 0.1 increments"
+
+    # Run simulations for each weight combination
+    results = []
+    for w in weight_grid:
+        metrics = composite_backlog_with_weights(
+            energy_system,
+            market,
+            P_demand_base,
+            E0_EVs,
+            tarriv_EVs,
+            tdepart_EVs,
+            dt,
+            dt_ems,
+            Emax_EV,
+            P_max_EV,
+            w,
+        )
+        results.append(metrics)
+
+    X = np.array(weight_grid)
+    metric_names = [
+        "aggregate_energy_deficit",
+        "aggregate_waiting_time",
+        "energy_variability",
+        "total_energy_cost",
+    ]
+
+    ridge_path = join(path, "ridge_regression")
+    if not os.path.isdir(ridge_path):
+        os.makedirs(ridge_path)
+
+    for metric_name in metric_names:
+        y = np.array([r[metric_name] for r in results])
+        model = Ridge(alpha=alpha)
+        model.fit(X, y)
+
+        fig = plt.figure(figsize=(6, 5))
+        ax = fig.add_subplot(111, projection="3d")
+        sc = ax.scatter(X[:, 0], X[:, 1], X[:, 2], c=y, cmap="viridis", s=40)
+        ax.set_xlabel("Wait Weight")
+        ax.set_ylabel("Required Weight")
+        ax.set_zlabel("Price Weight")
+        cbar = fig.colorbar(sc, ax=ax, pad=0.1)
+        cbar.set_label(metric_name)
+        fig.tight_layout()
+        fig.savefig(join(ridge_path, f"ridge_3d_{metric_name}{save_suffix}"))
+        plt.close(fig)
+
 
 if run_opt ==1:
            
@@ -1755,6 +1993,20 @@ if run_opt ==1:
                     nondispatch_assets, time_ems, time, timeE, buses_Vpu)
         plot_end_of_day_charge(storage_assets, metrics_path, x)
     plot_performance_metrics(metrics, metrics_path)
+    if 'composite_backlog' in opt_type:
+        ridge_regression_composite_backlog(
+            energy_system,
+            market,
+            P_demand_base,
+            E0_EVs,
+            tarriv_EVs,
+            tdepart_EVs,
+            dt,
+            dt_ems,
+            Emax_EV,
+            P_max_EV,
+            metrics_path,
+        )
 
 # Load pickled data and plot
 else:
