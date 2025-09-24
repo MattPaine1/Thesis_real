@@ -18,7 +18,7 @@ import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import pickle
-plt.style.use("seaborn-v0_8-whitegrid")
+# plt.style.use("seaborn-v0_8-whitegrid")
 
 from System.Network_3ph_pf import Network_3ph
 import System.Assets as AS
@@ -42,20 +42,20 @@ __version__ = "1.0.0"
 # run all optimisation/heuristic strats
 run_opt = 1
 # list of strats to evaluate
-# opt_type = ['open_loop', 'mpc', 'uncontrolled', 'edf', 'tou', 'valley', 'lp',
-#             'composite', 'pareto']
+opt_type = ['open_loop', 'edf', 'tou', 'valley',
+            'composite', 'pareto']
 # include soft variants with flexible valley filling
 # extended with experimental band and backlog variants
-opt_type = [
-    'composite',
-    'pareto',
-    'composite_soft',
-    'pareto_soft',
-    'composite_band',
-    'pareto_band',
-    'composite_backlog',
-    'pareto_backlog',
-]
+# opt_type = [
+#     'composite',
+#     'pareto',
+#     'composite_soft',
+#     'pareto_soft',
+#     'composite_band',
+#     'pareto_band',
+#     'composite_backlog',
+#     'pareto_backlog',
+# ]
 
 # softness factor for valley cap (1=hard cap, 0=no valley constraint)
 valley_softness = 0.75
