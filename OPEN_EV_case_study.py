@@ -78,6 +78,8 @@ if not os.path.isdir(metrics_path):
 metrics = {
     'peak_import_power': {}, # peak power imported at the grid interface
     'base_peak_network_demand': {}, # peak demand from uncontrollable assets only
+    'additional_import_power': {}, # max increase in import above the base load
+    'base_demand_at_additional_import': {}, # base demand when additional import occurs
     'aggregate_waiting_time': {}, # total waiting time of all EVs
     'waiting_times': {},  # list of waiting times per EV
     'energy_deficits': {},  # energy deficit per EV at departure (kWh)
@@ -215,8 +217,22 @@ def record_metrics(strategy, storage_assets, P_import, P_demand,
             num_uncharged += 1
 
     # metrics
-    metrics['peak_import_power'][strategy] = np.max(P_import)
-    metrics['base_peak_network_demand'][strategy] = np.max(P_demand_base)
+    P_import = np.asarray(P_import)
+    P_demand_base = np.asarray(P_demand_base)
+    diff_import_base = P_import - P_demand_base
+    max_diff_idx = int(np.argmax(diff_import_base)) if diff_import_base.size else 0
+    metrics['peak_import_power'][strategy] = float(np.max(P_import)) if P_import.size else 0.0
+    metrics['base_peak_network_demand'][strategy] = (
+        float(np.max(P_demand_base)) if P_demand_base.size else 0.0
+    )
+    if diff_import_base.size:
+        metrics['additional_import_power'][strategy] = float(diff_import_base[max_diff_idx])
+        metrics['base_demand_at_additional_import'][strategy] = float(
+            P_demand_base[max_diff_idx]
+        )
+    else:
+        metrics['additional_import_power'][strategy] = 0.0
+        metrics['base_demand_at_additional_import'][strategy] = 0.0
     metrics['energy_variability'][strategy] = np.max(P_import)-np.min(P_demand)
     metrics['waiting_times'][strategy] = waiting_times
     metrics['aggregate_waiting_time'][strategy] = np.nansum(waiting_times)
@@ -242,7 +258,7 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
         print(f"Strategy '{s}':")
         peak_import =metrics['peak_import_power'][s]
         base_peak = metrics['base_peak_network_demand'][s]
-        additional_import = peak_import - base_peak
+        additional_import = metrics['additional_import_power'][s]
         energy_var = metrics['energy_variability'][s]
         print(f"  Peak Import Power: {peak_import} kW")
         print(f"  Base Peak Network Demand: {base_peak} kW")
@@ -285,15 +301,16 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
              'Base Peak Network Demand (kW)',
              'base_peak_network_demand')
     # Combined stacked bar: base demand and additional imported power
-    additional_import = {
-        s: metrics['peak_import_power'][s] - metrics['base_peak_network_demand'][s]
+    additional_import = {s: metrics['additional_import_power'][s] for s in strats}
+    base_at_additional = {
+        s: metrics['base_demand_at_additional_import'][s]
         for s in strats
     }
-    base_vals = [metrics['base_peak_network_demand'][s] for s in strats]
+    base_vals = [base_at_additional[s] for s in strats]
     extra_vals = [additional_import[s] for s in strats]
     plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
                edgecolor='k')
-    plt.bar(strats, base_vals, label='Base Peak Network Demand')
+    plt.bar(strats, base_vals, label='Base Demand at Max Difference')
     plt.bar(strats, extra_vals, bottom=base_vals,
             label='Additional Imported Power', color='orange')
     plt.ylabel('Power (kW)')
@@ -305,7 +322,7 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
     plt.close()
 
     # O
-    bar_plot(additional_import, 'Additional Imported Power (kW)',
+    bar_plot(metrics['additional_import_power'], 'Additional Imported Power (kW)',
              'additional_imported_power')
     bar_plot(metrics['energy_variability'], 'Energy Variability (kW)',
              'energy_variability')
