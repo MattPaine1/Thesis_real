@@ -895,7 +895,8 @@ if run_opt ==1:
             safeguard = 2  # hours before departure to start charging, to avoid non-charges
             for t in range(T):
                 hour = t * dt # current hour
-                off_peak = (hour < 7) or (hour >= 22) # offpeak range
+                midday_valley = (hour >= 11) and (hour < 15)
+                off_peak = (hour < 7) or midday_valley or (hour >= 22) # offpeak range
                 t_ems = int(t / (dt_ems / dt))
                 P_avail = max(
                     market.Pmax[t_ems] - P_demand_base[t] - P_ESs[t].sum(), 0
