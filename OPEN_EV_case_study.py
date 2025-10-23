@@ -255,6 +255,31 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
     if not strats:
         return
 
+    def format_strategy_label(name):
+        label_map = {
+            'open_loop': 'Open Loop',
+            'mpc': 'MPC',
+            'uncontrolled': 'Unctrl',
+            'edf': 'EDF',
+            'tou': 'ToU',
+            'valley': 'Valley',
+            'lp': 'LP',
+            'composite': 'Composite',
+            'composite_band': 'Comp Band',
+            'composite_backlog': 'Comp Backlog',
+            'composite_soft': 'Comp Soft',
+            'composite_mpc': 'Comp MPC',
+            'pareto': 'Pareto',
+            'pareto_band': 'Pareto Band',
+            'pareto_backlog': 'Pareto Backlog',
+            'pareto_soft': 'Pareto Soft',
+            'pareto_mpc': 'Pareto MPC',
+        }
+        return label_map.get(name, name)
+
+    x_positions = np.arange(len(strats))
+    plot_labels = [format_strategy_label(s) for s in strats]
+
     print("Performance metrics:")
     for s in strats:
         print(f"Strategy '{s}':")
@@ -290,7 +315,8 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
     def bar_plot(values_dict, ylabel, filename):
         vals = [values_dict[s] for s in strats]
         plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
-        plt.bar(strats, vals)
+        plt.bar(x_positions, vals)
+        plt.xticks(x_positions, plot_labels)
         plt.ylabel(ylabel)
         plt.xlabel('Strategy')
         plt.tight_layout()
@@ -312,12 +338,13 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
     extra_vals = [additional_import[s] for s in strats]
     plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
                edgecolor='k')
-    plt.bar(strats, base_vals, label='Base Demand at Max Difference')
-    plt.bar(strats, extra_vals, bottom=base_vals,
+    plt.bar(x_positions, base_vals, label='Base Demand at Max Difference')
+    plt.bar(x_positions, extra_vals, bottom=base_vals,
             label='Peak Imported Power', color='orange')
     plt.ylabel('Power (kW)')
     plt.xlabel('Strategy')
     plt.legend()
+    plt.xticks(x_positions, plot_labels)
     plt.tight_layout()
     plt.savefig(join(path, normpath('import_power_combined' + save_suffix)),
                 bbox_inches='tight')
@@ -349,7 +376,7 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
 
     with plt.style.context("seaborn-v0_8-white"):
         plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w', edgecolor='k')
-        plt.boxplot([metrics['waiting_times'][s] for s in strats], labels=strats)
+        plt.boxplot([metrics['waiting_times'][s] for s in strats], labels=plot_labels)
         plt.ylabel('Waiting Time per EV (h)')
         plt.tight_layout()
         plt.savefig(join(path, normpath('waiting_time_per_ev' + save_suffix)),
@@ -363,8 +390,7 @@ def plot_performance_metrics(metrics, path): #print performance metrics for all 
         arr = arr[~np.isnan(arr)]
         if arr.size:
             data.append(arr)
-
-            labels.append(s)
+            labels.append(format_strategy_label(s))
     if data:
         # plt.figure(num=None, figsize=(6, 2.5), dpi=80, facecolor='w',
         #            edgecolor='k')
